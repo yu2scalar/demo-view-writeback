@@ -1,0 +1,9 @@
+{
+  "type": "scalardb",
+  "configs": {
+    "scalar.db.storage": "jdbc",
+    "scalar.db.contact_points": "jdbc:mysql://192.168.49.2:30306/",
+    "scalar.db.username": "root",
+    "scalar.db.password": "mysql"
+  }
+}

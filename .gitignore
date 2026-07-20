@@ -1,0 +1,19 @@
+# Gradle
+build/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+
+# Claude Code local settings
+.claude/settings.local.json*
+
+# ライセンス情報(コミット禁止。docs/local-env-setup.md 参照)
+config/set_license.sh
+
+# Stray root-owned mount-point directory (accidental docker volume artifact)
+/scalar-re-config.yml/
+
+# コンパイル産物(seed は javac がその場で生成)
+*.class

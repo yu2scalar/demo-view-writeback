@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>更新モジュールエディタ プロトタイプ (RPA 風フローチャート)</title>
+<link rel="stylesheet" href="vendor/drawflow.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; font-size: 13px;
+         display: flex; flex-direction: column; height: 100vh; }
+  header { background: #2c3e50; color: #fff; padding: 6px 12px; display: flex; gap: 10px; align-items: center; }
+  header button { padding: 5px 12px; border: none; border-radius: 3px; cursor: pointer; background: #3498db; color: #fff; }
+  #main { display: flex; flex: 1; min-height: 0; }
+  /* 左: パレット + Model 変数 */
+  #side { width: 230px; background: #f7f8fa; border-right: 1px solid #ddd; padding: 10px; overflow: auto; }
+  #side h3 { font-size: 12px; color: #666; margin: 8px 0 4px; }
+  .palette-item { background: #fff; border: 1px solid #b8c4ce; border-radius: 4px; padding: 6px 10px;
+    margin: 4px 0; cursor: grab; }
+  .palette-item:hover { background: #eaf2fb; }
+  .var-item { font-family: Consolas, monospace; font-size: 12px; padding: 2px 4px; color: #2c3e50; }
+  /* Drawflow キャンバス */
+  #drawflow { flex: 1; position: relative; background:
+    linear-gradient(90deg, #f0f1f3 1px, transparent 1px), linear-gradient(#f0f1f3 1px, transparent 1px);
+    background-size: 20px 20px; }
+  #canvasCtl { position: absolute; top: 10px; right: 10px; z-index: 20; display: flex; gap: 4px;
+    align-items: center; background: rgba(255,255,255,.92); border: 1px solid #ccd;
+    border-radius: 5px; padding: 4px 8px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  #canvasCtl button { width: 28px; height: 24px; border: 1px solid #b8c4ce; background: #fff;
+    border-radius: 3px; cursor: pointer; font-weight: 700; }
+  #canvasCtl button:hover { background: #eaf2fb; }
+  #canvasCtl .hint { font-size: 10px; color: #777; margin-left: 6px; }
+  .drawflow .drawflow-node { background: #fff; border: 1px solid #b8c4ce; border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12); padding: 0; width: 200px; font-size: 12px; }
+  .drawflow .drawflow-node.selected { border-color: #3498db; }
+  .node-head { color: #fff; padding: 4px 8px; border-radius: 5px 5px 0 0; font-weight: 600; }
+  .node-body { padding: 6px 8px; }
+  .node-body input, .node-body select { width: 100%; margin: 2px 0; border: 1px solid #ccc; padding: 2px 4px; font-size: 11px; }
+  .n-start .node-head { background: #16a085; }
+  .n-read .node-head { background: #2980b9; }
+  .n-var .node-head { background: #7f8c8d; }
+  .n-compare .node-head { background: #f39c12; }
+  .n-branch .node-head { background: #8e44ad; }
+  .n-update .node-head { background: #27ae60; }
+  .n-abort .node-head { background: #c0392b; }
+  .n-commit .node-head { background: #2c3e50; }
+  .outlabel { font-size: 10px; color: #888; text-align: center; padding: 0 6px 4px; }
+  /* ---- 縦フロー化: 入力を上辺中央、出力を下辺中央に配置 ---- */
+  #drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs {
+    position: absolute; left: 0; width: 100%; display: flex; justify-content: center; gap: 60px; }
+  #drawflow .drawflow-node .inputs { top: -9px; }
+  #drawflow .drawflow-node .outputs { bottom: -9px; }
+  #drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
+    position: static; margin: 0; width: 15px; height: 15px; border: 2px solid #7f8c8d; background: #fff; }
+  #drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: #f1c40f; }
+  dialog { border: 1px solid #999; border-radius: 6px; width: 640px; max-height: 85vh; }
+  dialog pre { overflow: auto; max-height: 65vh; background: #f7f8fa; padding: 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>更新モジュールエディタ</strong>
+  <span>対象: item_overview の item_stock_qty (ns_mysql.item_stock / TX)</span>
+  <button onclick="exportFlow()">保存 (JSON)</button>
+  <span style="margin-left:auto;font-size:11px;opacity:.8">左のコントロールをドラッグして配置 / 下辺○→上辺○で上から下に接続</span>
+</header>
+<div id="main">
+  <div id="side">
+    <h3>コントロール</h3>
+    <div class="palette-item" draggable="true" data-node="read">📥 レコード読込</div>
+    <div class="palette-item" draggable="true" data-node="var">🔤 変数</div>
+    <div class="palette-item" draggable="true" data-node="compare">⚖ 比較 (INT)</div>
+    <div class="palette-item" draggable="true" data-node="branch">🔀 分岐</div>
+    <div class="palette-item" draggable="true" data-node="update">✏ 更新</div>
+    <div class="palette-item" draggable="true" data-node="abort">⛔ 中断 (abort)</div>
+    <div class="palette-item" draggable="true" data-node="commit">✅ 完了 (commit)</div>
+    <h3>Model 変数 (自動生成)</h3>
+    <div class="var-item">$input.*　… 受信レコード</div>
+    <div class="var-item">rec.id : INT</div>
+    <div class="var-item">rec.item_group_id : INT</div>
+    <div class="var-item">rec.item_stock_qty : INT</div>
+    <h3 style="margin-top:14px">メモ</h3>
+    <div style="font-size:11px;color:#888">
+      更新対象カラムのテーブル Model 変数(rec.*)と更新コントロールはデフォルトで配置されます。
+    </div>
+  </div>
+  <div id="drawflow">
+    <div id="canvasCtl">
+      <button onclick="editor.zoom_out()" title="縮小">−</button>
+      <button onclick="editor.zoom_reset()" title="100%">1:1</button>
+      <button onclick="editor.zoom_in()" title="拡大">＋</button>
+      <span class="hint">背景ドラッグで移動 / Ctrl+ホイールでズーム</span>
+    </div>
+  </div>
+</div>
+<dialog id="jsonDialog">
+  <h3>更新モジュール定義 JSON</h3>
+  <pre id="jsonOut"></pre>
+  <button onclick="document.getElementById('jsonDialog').close()">閉じる</button>
+</dialog>
+
+<script src="vendor/drawflow.min.js"></script>
+<script>
+const container = document.getElementById("drawflow");
+const editor = new Drawflow(container);
+editor.start();
+// エルボー(直角)コネクタ: 出力(下辺)から下へ → 水平 → 入力(上辺)へ下りる
+editor.createCurvature = function (sx, sy, ex, ey) {
+  const my = ey > sy ? (sy + ey) / 2 : sy + 30;
+  return `M ${sx} ${sy} L ${sx} ${my} L ${ex} ${my} L ${ex} ${ey}`;
+};
+
+// ---- ノードテンプレート(df-* 属性で Drawflow のデータバインドを利用) ----
+const NODE_DEFS = {
+  start:   { title: "開始 (Begin)", inputs: 0, outputs: 1, cls: "n-start",
+             data: {},
+             body: `<div class="node-body">Tx 開始 + 受信: view 行 + 更新値</div>` },
+  read:    { title: "レコード読込", inputs: 1, outputs: 1, cls: "n-read",
+             data: { table: "ns_mysql.item_stock", key: "id=$input.id, item_group_id=$input.item_group_id", into: "rec" },
+             body: `<div class="node-body">
+                      <input df-table title="対象テーブル">
+                      <input df-key title="キー条件">
+                      <input df-into title="格納変数">
+                    </div>` },
+  var:     { title: "変数",        inputs: 1, outputs: 1, cls: "n-var",
+             data: { name: "newQty", expr: "$input.item_stock_qty" },
+             body: `<div class="node-body"><input df-name title="変数名"><input df-expr title="式"></div>` },
+  compare: { title: "比較 (INT)",  inputs: 1, outputs: 1, cls: "n-compare",
+             data: { left: "rec.item_stock_qty", op: ">=", right: "0" },
+             body: `<div class="node-body">
+                      <input df-left title="左辺">
+                      <select df-op><option>==</option><option>!=</option><option>&gt;=</option>
+                        <option>&gt;</option><option>&lt;=</option><option>&lt;</option></select>
+                      <input df-right title="右辺">
+                    </div>` },
+  branch:  { title: "分岐",        inputs: 1, outputs: 2, cls: "n-branch",
+             data: { cond: "直前の比較結果" },
+             body: `<div class="node-body">条件: 直前の比較結果</div><div class="outlabel">左: true / 右: false</div>` },
+  update:  { title: "更新",        inputs: 1, outputs: 1, cls: "n-update",
+             data: { table: "ns_mysql.item_stock", set: "item_stock_qty = $input.item_stock_qty" },
+             body: `<div class="node-body"><input df-table title="対象テーブル"><input df-set title="SET 式"></div>` },
+  abort:   { title: "中断 (abort)", inputs: 1, outputs: 0, cls: "n-abort",
+             data: { reason: "検証NG" },
+             body: `<div class="node-body"><input df-reason title="理由"></div>` },
+  commit:  { title: "完了 (commit)", inputs: 1, outputs: 0, cls: "n-commit",
+             data: {},
+             body: `<div class="node-body">トランザクション確定</div>` },
+};
+
+function addNode(type, x, y) {
+  const def = NODE_DEFS[type];
+  const html = `<div><div class="node-head">${def.title}</div>${def.body}</div>`;
+  return editor.addNode(type, def.inputs, def.outputs, x, y, def.cls, JSON.parse(JSON.stringify(def.data)), html);
+}
+
+// ---- パレットからのドラッグ配置 ----
+document.querySelectorAll(".palette-item").forEach(item => {
+  item.addEventListener("dragstart", ev => ev.dataTransfer.setData("node", item.dataset.node));
+});
+container.addEventListener("dragover", ev => ev.preventDefault());
+container.addEventListener("drop", ev => {
+  ev.preventDefault();
+  const type = ev.dataTransfer.getData("node");
+  if (!type) return;
+  const rect = container.getBoundingClientRect();
+  addNode(type, ev.clientX - rect.left, ev.clientY - rect.top);
+});
+
+// ---- デフォルトフロー(更新対象テーブルの Model 変数 + 更新コントロール) ----
+// 開始 → レコード読込(rec) → 比較(在庫チェック) → 分岐 → true:更新→完了 / false:中断(縦フロー)
+const nStart   = addNode("start", 380, 20);
+const nRead    = addNode("read", 380, 130);
+const nCompare = addNode("compare", 380, 300);
+const nBranch  = addNode("branch", 380, 470);
+const nUpdate  = addNode("update", 200, 600);
+const nAbort   = addNode("abort", 620, 600);
+const nCommit  = addNode("commit", 200, 750);
+editor.updateNodeDataFromId(nCompare, { left: "rec.item_stock_qty", op: ">=", right: "$input.item_stock_qty" });
+editor.addConnection(nStart, nRead, "output_1", "input_1");
+editor.addConnection(nRead, nCompare, "output_1", "input_1");
+editor.addConnection(nCompare, nBranch, "output_1", "input_1");
+editor.addConnection(nBranch, nUpdate, "output_1", "input_1");   // true
+editor.addConnection(nBranch, nAbort, "output_2", "input_1");    // false
+editor.addConnection(nUpdate, nCommit, "output_1", "input_1");
+
+// ---- 保存: Drawflow のグラフを実行エンジン向けフロー定義 JSON に変換 ----
+function exportFlow() {
+  const raw = editor.export().drawflow.Home.data;
+  const nodes = Object.values(raw).map(n => ({
+    id: Number(n.id),
+    type: n.name,
+    params: n.data,
+    next: Object.fromEntries(Object.entries(n.outputs).map(([port, o]) =>
+      [n.name === "branch" ? (port === "output_1" ? "true" : "false") : "next",
+       o.connections.map(c => Number(c.node))])),
+  }));
+  const flow = {
+    moduleName: "check_stock_and_update",
+    target: { view: "item_overview", column: "item_stock_qty", table: "ns_mysql.item_stock", via: "TX" },
+    variables: { input: "$input.*", record: "rec.*" },
+    nodes,
+  };
+  document.getElementById("jsonOut").textContent = JSON.stringify(flow, null, 2);
+  document.getElementById("jsonDialog").showModal();
+  console.log("update_module", flow, "raw drawflow:", editor.export());
+}
+</script>
+</body>
+</html>

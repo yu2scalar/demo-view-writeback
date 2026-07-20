@@ -1,0 +1,28 @@
+{
+  "viewName": "vw_project_overview",
+  "catalog": "scalardb_catalog",
+  "tables": [
+    {"alias": "p", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "project", "table": "project", "keyColumns": ["project_id"], "scalarDb": true},
+    {"alias": "m", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "project", "table": "material", "keyColumns": ["material_id"], "scalarDb": true},
+    {"alias": "e", "dataSource": "ds_postgres", "providerType": "postgresql", "namespace": "erp", "table": "project_order", "keyColumns": ["project_id"], "scalarDb": false}
+  ],
+  "joins": [
+    {"type": "INNER", "left": "p.material_id", "right": "m.material_id"},
+    {"type": "INNER", "left": "p.project_id", "right": "e.project_id"}
+  ],
+  "columns": [
+    {"viewColumn": "project_id", "source": "p.project_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": 1, "sortDir": "ASC", "via": "TX"},
+    {"viewColumn": "project_name", "source": "p.project_name", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "status", "source": "p.status", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "budget", "source": "p.budget", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "material_id", "source": "p.material_id", "kind": "INT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "material_volume", "source": "p.material_volume", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "m_material_id", "source": "m.material_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "material_name", "source": "m.material_name", "kind": "TEXT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "stock", "source": "m.stock", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "allocated", "source": "m.allocated", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "e_project_id", "source": "e.project_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "RE"},
+    {"viewColumn": "order_no", "source": "e.order_no", "kind": "TEXT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "RE"},
+    {"viewColumn": "order_status", "source": "e.order_status", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "RE"}
+  ]
+}

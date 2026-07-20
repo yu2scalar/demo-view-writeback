@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>View Builder — demo-view-writeback</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; font-size: 13px;
+         display: flex; flex-direction: column; height: 100vh; background: #f4f5f7; }
+  header { background: #2c3e50; color: #fff; padding: 6px 12px; display: flex; gap: 10px; align-items: center; }
+  header a { color: #9fc3e8; text-decoration: none; }
+  header input { padding: 4px 8px; border: none; border-radius: 3px; width: 220px; }
+  header button { padding: 5px 12px; border: none; border-radius: 3px; cursor: pointer; background: #3498db; color: #fff; }
+  header button:hover { background: #2980b9; }
+  #main { display: flex; flex: 1; min-height: 0; }
+  #tree { width: 250px; background: #fff; border-right: 1px solid #ddd; overflow: auto; padding: 8px; }
+  #tree h3 { margin: 4px 0; font-size: 12px; color: #666; }
+  .tree-ds { margin: 6px 0 2px; font-weight: 600; }
+  .badge { font-size: 10px; border-radius: 3px; padding: 1px 5px; color: #fff; margin-left: 4px; }
+  .badge.tx { background: #27ae60; } .badge.re { background: #e67e22; }
+  .tree-ns { margin-left: 10px; color: #555; cursor: pointer; }
+  .tree-ns:hover { background: #f0f4f8; }
+  .tree-tables { margin-left: 10px; display: none; }
+  .tree-tables.open { display: block; }
+  .tree-table { margin-left: 12px; padding: 2px 6px; cursor: grab; border-radius: 3px; white-space: nowrap; }
+  .tree-table:hover { background: #eaf2fb; }
+  #center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #canvas { flex: 1; position: relative; overflow: auto; background:
+    linear-gradient(90deg, #f0f1f3 1px, transparent 1px), linear-gradient(#f0f1f3 1px, transparent 1px);
+    background-size: 20px 20px; }
+  #canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #canvas svg path.wire { pointer-events: stroke; cursor: pointer; }
+  #canvas svg path.wire:hover { stroke-width: 4; }
+  .table-card { position: absolute; width: 220px; background: #fff; border: 1px solid #b8c4ce;
+    border-radius: 5px; box-shadow: 0 2px 6px rgba(0,0,0,.12); user-select: none; }
+  .table-card .head { background: #34495e; color: #fff; padding: 4px 8px; border-radius: 5px 5px 0 0;
+    cursor: move; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .table-card .head .close { cursor: pointer; padding: 0 4px; }
+  .table-card .head .alias { cursor: pointer; text-decoration: underline dotted; }
+  .table-card .head .alias:hover { color: #f1c40f; }
+  .col-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-top: 1px solid #f0f0f0; }
+  .col-row:hover { background: #f5faff; }
+  .col-row .kind { color: #999; font-size: 11px; margin-left: auto; }
+  .col-row .handle { width: 10px; height: 10px; border-radius: 50%; background: #b8c4ce; cursor: crosshair; flex: none; }
+  .col-row .handle:hover, .col-row .handle.active { background: #e74c3c; }
+  .col-row .handle.connected { background: #2980b9; }
+  .keyicon { font-size: 11px; width: 16px; display: inline-block; }
+  .keyicon.togglable { cursor: pointer; border: 1px dashed #ccc; border-radius: 3px; text-align: center; }
+  #bottom { height: 270px; background: #fff; border-top: 2px solid #ccd; display: flex; flex-direction: column; }
+  #tabs { display: flex; background: #ecf0f1; }
+  #tabs div { padding: 6px 16px; cursor: pointer; border-right: 1px solid #ddd; }
+  #tabs div.active { background: #fff; font-weight: 600; }
+  .pane { flex: 1; overflow: auto; padding: 8px; display: none; }
+  .pane.active { display: block; }
+  table.grid { border-collapse: collapse; width: 100%; }
+  table.grid th, table.grid td { border: 1px solid #ddd; padding: 3px 8px; text-align: left; }
+  table.grid th { background: #f7f8fa; }
+  table.grid input[type=text] { width: 130px; border: 1px solid #ccc; padding: 2px 4px; }
+  pre#sql { margin: 0; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+  select { border: 1px solid #ccc; padding: 2px; }
+  .join-row { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .join-row button { border: none; background: #e74c3c; color: #fff; border-radius: 3px; cursor: pointer; padding: 2px 8px; }
+  dialog { border: 1px solid #999; border-radius: 6px; width: 640px; max-height: 80vh; }
+  dialog pre { overflow: auto; max-height: 55vh; background: #f7f8fa; padding: 8px; }
+  #joinPopup { position: absolute; z-index: 50; background: #fff; border: 1px solid #999;
+    border-radius: 5px; box-shadow: 0 3px 10px rgba(0,0,0,.25); padding: 8px; display: none; }
+  #joinPopup .title { font-family: Consolas, monospace; font-size: 12px; margin-bottom: 6px; }
+  #joinPopup button { border: none; background: #e74c3c; color: #fff; border-radius: 3px;
+    cursor: pointer; padding: 3px 10px; margin-left: 8px; }
+  #status { color: #f1c40f; font-size: 12px; }
+  #status.ng { color: #ff8f7a; font-weight: 600; }
+  header button.warn { background: #e67e22; }
+  header button.warn:hover { background: #cf6d15; }
+</style>
+</head>
+<body>
+<header>
+  <strong>View Builder</strong>
+  <input id="viewName" placeholder="View 名 (例: item_overview)">
+  <button id="createBtn" onclick="createView()">保存 (実体生成 + マテリアライズ)</button>
+  <button id="refreshBtn" class="warn" onclick="refreshView()" hidden
+          title="実体を truncate して spark-connect で再マテリアライズ">リフレッシュ (再マテリアライズ)</button>
+  <span id="status"></span>
+  <span style="margin-left:auto"></span>
+  <a id="dataEditLink" href="data-edit.html">データ編集</a>
+  <a href="index.html">ホーム</a>
+</header>
+<div id="main">
+  <div id="tree"><h3>Analytics カタログ</h3><div id="treeBody">読込中…</div></div>
+  <div id="center">
+    <div id="canvas"><svg id="wires"></svg>
+      <div id="joinPopup">
+        <div class="title"></div>
+        <select id="joinPopupType" onchange="popupChangeType(this.value)"></select>
+        <button onclick="popupDeleteJoin()">削除</button>
+      </div>
+    </div>
+    <div id="bottom">
+      <div id="tabs">
+        <div class="active" data-pane="pane-cols" onclick="selectTab(this)">列マッピング</div>
+        <div data-pane="pane-joins" onclick="selectTab(this)">JOIN</div>
+        <div data-pane="pane-sql" onclick="selectTab(this)">SQL</div>
+        <div data-pane="pane-result" onclick="selectTab(this)">実行結果</div>
+      </div>
+      <div id="pane-cols" class="pane active"></div>
+      <div id="pane-joins" class="pane"></div>
+      <div id="pane-sql" class="pane"><pre id="sql"></pre></div>
+      <div id="pane-result" class="pane">
+        <div style="padding: 6px 0;">
+          <button onclick="runPreview()" id="previewBtn">▶ 実行</button>
+          <span id="previewStatus" style="margin-left: 10px; color: #555;"></span>
+        </div>
+        <div id="previewOut"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<dialog id="resultDialog">
+  <h3 id="resultTitle"></h3>
+  <pre id="resultOut"></pre>
+  <p id="resultLinks"></p>
+  <button onclick="document.getElementById('resultDialog').close()">閉じる</button>
+</dialog>
+
+<dialog id="lookupDialog" style="min-width: 380px;">
+  <h3 style="margin-top:0">選択値(ルックアップ)の設定</h3>
+  <p id="luTarget" style="color:#555; font-size:12px;"></p>
+  <p style="font-size:12px; color:#777;">ソースは ScalarDB 管理テーブルか作成済み view。
+    外部 raw テーブル(RE 側)は view 化してから指定してください。</p>
+  <div style="display:grid; grid-template-columns:80px 1fr; gap:6px; align-items:center;">
+    <label>ソース</label><select id="luSource" onchange="luSourceChanged()"></select>
+    <label>キー列</label><select id="luKey"></select>
+    <label>表示列</label><select id="luLabel"></select>
+  </div>
+  <div style="margin-top:12px; display:flex; gap:8px;">
+    <button onclick="saveLookup()">設定</button>
+    <button onclick="clearLookup()">解除</button>
+    <button onclick="document.getElementById('lookupDialog').close()">キャンセル</button>
+  </div>
+</dialog>
+
+<script>
+// ---- 状態 ----
+let CATALOGS = [];       // /api/catalog の応答
+const placed = [];       // {alias, catalog, ds, providerType, ns, tableName, columns, pk, ck, keysKnown, x, y, el, selected}
+const joins = [];
+const colOptions = {};
+let aliasSeq = 0;
+const JOIN_TYPES = ["INNER", "LEFT", "RIGHT", "FULL"];
+const JOIN_SQL = { INNER: "INNER JOIN", LEFT: "LEFT OUTER JOIN", RIGHT: "RIGHT OUTER JOIN", FULL: "FULL OUTER JOIN" };
+const JOIN_COLOR = { INNER: "#2980b9", LEFT: "#8e44ad", RIGHT: "#16a085", FULL: "#e67e22" };
+
+// ---- カタログツリー(REST) ----
+async function loadCatalog() {
+  const res = await fetch("/api/catalog");
+  const body = await res.json();
+  if (!body.success) { document.getElementById("treeBody").textContent = body.message; return; }
+  CATALOGS = body.data;
+  const root = document.getElementById("treeBody");
+  root.innerHTML = "";
+  CATALOGS.forEach(cat => {
+    cat.dataSources.forEach(ds => {
+      const dsDiv = document.createElement("div");
+      dsDiv.className = "tree-ds";
+      dsDiv.innerHTML = `${ds.name}<span class="badge ${ds.scalardb ? "tx" : "re"}">${ds.scalardb ? "TX" : "RE"}</span>`;
+      root.appendChild(dsDiv);
+      ds.namespaces.forEach(ns => {
+        const nsDiv = document.createElement("div");
+        nsDiv.className = "tree-ns";
+        nsDiv.textContent = "▸ " + ns.name + ` (${ns.tables.length})`;
+        const tablesDiv = document.createElement("div");
+        tablesDiv.className = "tree-tables";
+        nsDiv.addEventListener("click", () => {
+          tablesDiv.classList.toggle("open");
+          nsDiv.textContent = (tablesDiv.classList.contains("open") ? "▾ " : "▸ ") + ns.name + ` (${ns.tables.length})`;
+        });
+        root.appendChild(nsDiv);
+        ns.tables.forEach(t => {
+          const tDiv = document.createElement("div");
+          tDiv.className = "tree-table";
+          tDiv.textContent = "▦ " + t.name;
+          tDiv.draggable = true;
+          tDiv.addEventListener("dragstart", ev => ev.dataTransfer.setData("text/plain",
+              JSON.stringify({ catalog: cat.catalog, ds: ds.name, providerType: ds.providerType,
+                               scalardb: ds.scalardb, ns: ns.name, table: t.name })));
+          tablesDiv.appendChild(tDiv);
+        });
+        root.appendChild(tablesDiv);
+      });
+    });
+  });
+}
+loadCatalog().then(() => initEditMode());
+
+function findCatalogTable(ref) {
+  for (const cat of CATALOGS) {
+    if (cat.catalog !== ref.catalog) continue;
+    for (const ds of cat.dataSources) {
+      if (ds.name !== ref.ds) continue;
+      for (const ns of ds.namespaces) {
+        if (ns.name !== ref.ns) continue;
+        for (const t of ns.tables) {
+          if (t.name === ref.table) return t;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// ---- キャンバスへのドロップ ----
+const canvas = document.getElementById("canvas");
+canvas.addEventListener("dragover", ev => ev.preventDefault());
+canvas.addEventListener("drop", async ev => {
+  ev.preventDefault();
+  const ref = JSON.parse(ev.dataTransfer.getData("text/plain"));
+  const rect = canvas.getBoundingClientRect();
+  await addTable(ref, ev.clientX - rect.left + canvas.scrollLeft, ev.clientY - rect.top + canvas.scrollTop);
+});
+
+async function addTable(ref, x, y, preset) {
+  const catalogTable = findCatalogTable(ref);
+  if (!catalogTable) return;
+  // キー情報の遅延取得(scalardb は getTableMetadata、それ以外は known=false)
+  let pk = [], ck = [], keysKnown = false;
+  if (ref.scalardb) {
+    const res = await fetch(`/api/catalog/table-keys?namespace=${encodeURIComponent(ref.ns)}&table=${encodeURIComponent(ref.table)}`);
+    const body = await res.json();
+    if (body.success && body.data.known) {
+      pk = body.data.partitionKeys; ck = body.data.clusteringKeys; keysKnown = true;
+    }
+  }
+  if (!keysKnown && preset && preset.keyColumns.length > 0) {
+    pk = [preset.keyColumns[0]]; ck = preset.keyColumns.slice(1); // 編集時: 保存済みキーを復元
+  } else if (!keysKnown && catalogTable.columns.length > 0) {
+    pk = [catalogTable.columns[0].name]; // 既定: 先頭列。GUI 上でトグル変更可
+  }
+  const alias = preset ? preset.alias : "t" + (++aliasSeq);
+  if (preset) {
+    const num = parseInt(alias.replace(/^t/, ""), 10);
+    if (!isNaN(num) && num > aliasSeq) aliasSeq = num;
+  }
+  const entry = { alias, catalog: ref.catalog, ds: ref.ds, providerType: ref.providerType,
+                  ns: ref.ns, tableName: ref.table, columns: catalogTable.columns,
+                  pk: [...pk], ck: [...ck], keysKnown, x, y,
+                  selected: new Set(preset ? preset.selected : [...pk, ...ck]) };
+  renderCard(entry);
+  placed.push(entry);
+  refresh();
+}
+
+function renderCard(entry) {
+  const card = document.createElement("div");
+  card.className = "table-card";
+  card.style.left = entry.x + "px";
+  card.style.top = entry.y + "px";
+  const via = entry.providerType === "scalardb" ? "tx" : "re";
+  card.innerHTML = `<div class="head"><span><span class="alias" title="クリックで別名を変更">${entry.alias}</span>: ${entry.ns}.${entry.tableName}
+      <span class="badge ${via}">${via.toUpperCase()}</span></span><span class="close">✕</span></div>`;
+  const aliasEl = card.querySelector(".alias");
+  aliasEl.addEventListener("mousedown", ev => ev.stopPropagation()); // 見出しドラッグと分離
+  aliasEl.addEventListener("click", () => renameAlias(entry, card));
+  entry.columns.forEach(col => {
+    const row = document.createElement("div");
+    row.className = "col-row";
+    const isKey = entry.pk.includes(col.name) || entry.ck.includes(col.name);
+    row.innerHTML = `<input type="checkbox" ${isKey ? "checked disabled" : entry.selected.has(col.name) ? "checked" : ""}>
+      <span class="keyicon ${entry.keysKnown ? "" : "togglable"}" title="${entry.keysKnown ? "" : "クリックでキー指定/解除"}">${keyMark(entry, col.name)}</span>
+      <span>${col.name}</span><span class="kind">${col.kind}</span><span class="handle" title="ドラッグで JOIN"></span>`;
+    const cb = row.querySelector("input");
+    cb.addEventListener("change", () => {
+      cb.checked ? entry.selected.add(col.name) : entry.selected.delete(col.name);
+      refresh();
+    });
+    if (!entry.keysKnown) {
+      row.querySelector(".keyicon").addEventListener("click", () => toggleKey(entry, col.name, card));
+    }
+    row.querySelector(".handle").dataset.ref = entry.alias + "." + col.name;
+    card.appendChild(row);
+  });
+  card.querySelector(".close").addEventListener("click", () => removeTable(entry, card));
+  enableDragMove(card, entry);
+  canvas.appendChild(card);
+  entry.el = card;
+}
+
+function keyMark(entry, colName) {
+  return entry.pk.includes(colName) ? "🔑" : entry.ck.includes(colName) ? "🗝" : "";
+}
+
+/** 非 scalardb テーブルのキー手動指定(先頭指定=パーティションキー、以降=クラスタリング) */
+function toggleKey(entry, colName, card) {
+  if (entry.pk.includes(colName)) {
+    entry.pk = entry.pk.filter(c => c !== colName);
+  } else if (entry.ck.includes(colName)) {
+    entry.ck = entry.ck.filter(c => c !== colName);
+  } else if (entry.pk.length === 0) {
+    entry.pk.push(colName);
+  } else {
+    entry.ck.push(colName);
+  }
+  entry.selected = new Set([...entry.pk, ...entry.ck,
+      ...[...entry.selected].filter(c => !entry.pk.includes(c) && !entry.ck.includes(c))]);
+  card.remove();
+  renderCard(entry);
+  refresh();
+}
+
+/** テーブル別名の変更: JOIN・列マッピング・既定の View 列名も追従させる */
+function renameAlias(entry, card) {
+  const name = prompt("テーブル別名:", entry.alias);
+  if (!name || name === entry.alias) return;
+  if (!/^[a-z][a-z0-9_]{0,30}$/.test(name)) {
+    setError("別名は英小文字はじまりの [a-z][a-z0-9_]* 形式(31文字以内)で入力してください");
+    return;
+  }
+  if (placed.some(p => p.alias === name)) {
+    setError(`別名 '${name}' は既に使われています`);
+    return;
+  }
+  const old = entry.alias;
+  entry.alias = name;
+  joins.forEach(j => {
+    if (j.fromAlias === old) j.fromAlias = name;
+    if (j.toAlias === old) j.toAlias = name;
+  });
+  Object.keys(colOptions).filter(k => k.startsWith(old + ".")).forEach(k => {
+    const col = k.substring(old.length + 1);
+    const opt = colOptions[k];
+    delete colOptions[k];
+    if (opt.viewName === `${old}_${col}`) opt.viewName = `${name}_${col}`; // 既定名なら追従
+    colOptions[`${name}.${col}`] = opt;
+  });
+  card.remove();
+  renderCard(entry);
+  refresh();
+}
+
+function removeTable(entry, card) {
+  card.remove();
+  placed.splice(placed.indexOf(entry), 1);
+  for (let i = joins.length - 1; i >= 0; i--) {
+    if (joins[i].fromAlias === entry.alias || joins[i].toAlias === entry.alias) joins.splice(i, 1);
+  }
+  refresh();
+}
+
+function enableDragMove(card, entry) {
+  card.querySelector(".head").addEventListener("mousedown", ev => {
+    if (ev.target.classList.contains("close")) return;
+    const startX = ev.clientX, startY = ev.clientY, origX = entry.x, origY = entry.y;
+    function move(e) {
+      entry.x = origX + e.clientX - startX;
+      entry.y = origY + e.clientY - startY;
+      card.style.left = entry.x + "px";
+      card.style.top = entry.y + "px";
+      drawWires();
+    }
+    function up() { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// ---- JOIN 結線 ----
+let dragFrom = null;
+canvas.addEventListener("mousedown", ev => {
+  if (!ev.target.classList.contains("handle")) return;
+  dragFrom = ev.target;
+  dragFrom.classList.add("active");
+  ev.preventDefault();
+});
+document.addEventListener("mouseup", ev => {
+  if (!dragFrom) return;
+  const target = document.elementFromPoint(ev.clientX, ev.clientY);
+  if (target && target.classList.contains("handle") && target !== dragFrom) {
+    const [fa, fc] = dragFrom.dataset.ref.split(".");
+    const [ta, tc] = target.dataset.ref.split(".");
+    if (fa !== ta) joins.push({ fromAlias: fa, fromCol: fc, toAlias: ta, toCol: tc, type: "INNER" });
+  }
+  dragFrom.classList.remove("active");
+  dragFrom = null;
+  refresh();
+});
+
+function handlePos(ref) {
+  const h = [...document.querySelectorAll(".handle")].find(x => x.dataset.ref === ref);
+  if (!h) return null;
+  const hr = h.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+  return { x: hr.left + hr.width / 2 - cr.left + canvas.scrollLeft, y: hr.top + hr.height / 2 - cr.top + canvas.scrollTop };
+}
+
+function drawWires() {
+  const svg = document.getElementById("wires");
+  svg.innerHTML = "";
+  document.querySelectorAll(".handle.connected").forEach(h => h.classList.remove("connected"));
+  const labelStack = {};
+  joins.forEach((j, idx) => {
+    const fromRef = j.fromAlias + "." + j.fromCol, toRef = j.toAlias + "." + j.toCol;
+    const p1 = handlePos(fromRef), p2 = handlePos(toRef);
+    if (!p1 || !p2) return;
+    [fromRef, toRef].forEach(ref => {
+      const h = [...document.querySelectorAll(".handle")].find(x => x.dataset.ref === ref);
+      if (h) h.classList.add("connected");
+    });
+    // エルボー。縦線がカードに重なるときは右へ迂回
+    let mid = (p1.x + p2.x) / 2;
+    const yLo = Math.min(p1.y, p2.y), yHi = Math.max(p1.y, p2.y);
+    const blocked = placed.some(p => {
+      const w = p.el.offsetWidth, h = p.el.offsetHeight;
+      return mid >= p.x - 4 && mid <= p.x + w + 4 && yHi >= p.y && yLo <= p.y + h;
+    });
+    if (blocked) mid = Math.max(p1.x, p2.x) + 25;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${p1.x} ${p1.y} L ${mid} ${p1.y} L ${mid} ${p2.y} L ${p2.x} ${p2.y}`);
+    path.setAttribute("stroke", JOIN_COLOR[j.type]);
+    path.setAttribute("stroke-width", "2.5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("class", "wire");
+    path.addEventListener("click", ev => openJoinPopup(idx, ev));
+    svg.appendChild(path);
+    const left = p1.x <= p2.x ? p1 : p2;
+    const stackKey = Math.round(left.x) + ":" + Math.round(left.y);
+    const stack = labelStack[stackKey] = (labelStack[stackKey] ?? -1) + 1;
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", left.x + 16); label.setAttribute("y", left.y - 7 - stack * 13);
+    label.setAttribute("fill", "#444"); label.setAttribute("font-size", "10");
+    label.setAttribute("paint-order", "stroke");
+    label.setAttribute("stroke", "#ffffff"); label.setAttribute("stroke-width", "3");
+    label.textContent = `${j.type}: ${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+    svg.appendChild(label);
+  });
+}
+
+// ---- JOIN 編集ポップアップ ----
+let popupJoinIndex = -1;
+function openJoinPopup(idx, ev) {
+  popupJoinIndex = idx;
+  const j = joins[idx];
+  const popup = document.getElementById("joinPopup");
+  popup.querySelector(".title").textContent = `${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+  document.getElementById("joinPopupType").innerHTML =
+      JOIN_TYPES.map(t => `<option ${j.type === t ? "selected" : ""}>${t}</option>`).join("");
+  const rect = canvas.getBoundingClientRect();
+  popup.style.left = (ev.clientX - rect.left + canvas.scrollLeft + 8) + "px";
+  popup.style.top = (ev.clientY - rect.top + canvas.scrollTop + 8) + "px";
+  popup.style.display = "block";
+  ev.stopPropagation();
+}
+function popupChangeType(type) { if (popupJoinIndex >= 0) { joins[popupJoinIndex].type = type; refresh(); } }
+function popupDeleteJoin() { if (popupJoinIndex >= 0) { joins.splice(popupJoinIndex, 1); closeJoinPopup(); refresh(); } }
+function closeJoinPopup() { document.getElementById("joinPopup").style.display = "none"; popupJoinIndex = -1; }
+canvas.addEventListener("mousedown", ev => {
+  if (!ev.target.closest("#joinPopup") && !ev.target.classList.contains("wire")) closeJoinPopup();
+});
+
+// ---- 列マッピング / JOIN 一覧 / SQL ----
+function selectedColumns() {
+  const cols = [];
+  placed.forEach(p => p.columns.forEach(c => {
+    const isKey = p.pk.includes(c.name) || p.ck.includes(c.name);
+    if (!p.selected.has(c.name) && !isKey) return;
+    const key = p.alias + "." + c.name;
+    if (!colOptions[key]) {
+      colOptions[key] = { viewName: placed.length > 1 ? p.alias + "_" + c.name : c.name,
+                          visible: true, updatable: false, sortOrder: 0, sortDir: "ASC" };
+    }
+    cols.push({ key, alias: p.alias, col: c.name, kind: c.kind, isKey, providerType: p.providerType, opt: colOptions[key] });
+  }));
+  return cols;
+}
+
+function refresh() {
+  drawWires();
+  const cols = selectedColumns();
+  const usedSortNums = cols.map(c => c.opt.sortOrder).filter(n => n > 0);
+  const pane = document.getElementById("pane-cols");
+  pane.innerHTML = `<table class="grid"><tr><th>View 列名</th><th>ソース</th><th>型</th><th>キー</th>
+    <th>表示</th><th>更新可</th><th>ソート順</th><th>昇降</th><th>経路</th><th>選択値</th></tr>` +
+    cols.map(c => `<tr>
+      <td><input type="text" value="${c.opt.viewName}" onchange="colOptions['${c.key}'].viewName=this.value; renderSql()"></td>
+      <td>${c.key}</td><td>${c.kind}</td>
+      <td>${c.isKey ? "🔑 (除外不可)" : ""}</td>
+      <td><input type="checkbox" ${c.opt.visible ? "checked" : ""} onchange="colOptions['${c.key}'].visible=this.checked"></td>
+      <td><input type="checkbox" ${c.opt.updatable ? "checked" : ""} ${c.isKey ? "disabled" : ""}
+          onchange="colOptions['${c.key}'].updatable=this.checked"></td>
+      <td><select onchange="colOptions['${c.key}'].sortOrder=+this.value; refresh()">
+        <option value="0">—</option>
+        ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${c.opt.sortOrder === n ? "selected" : ""}
+          ${usedSortNums.includes(n) && c.opt.sortOrder !== n ? "disabled" : ""}>${n}</option>`).join("")}
+      </select></td>
+      <td><select ${c.opt.sortOrder === 0 ? "disabled" : ""} onchange="colOptions['${c.key}'].sortDir=this.value; renderSql()">
+        <option value="ASC" ${c.opt.sortDir === "ASC" ? "selected" : ""}>昇順</option>
+        <option value="DESC" ${c.opt.sortDir === "DESC" ? "selected" : ""}>降順</option>
+      </select></td>
+      <td><span class="badge ${c.providerType === "scalardb" ? "tx" : "re"}">${c.providerType === "scalardb" ? "TX" : "RE"}</span></td>
+      <td>${c.isKey ? "" : `<button onclick="openLookup('${c.key}')" title="選択値(ルックアップ)の設定">${
+          c.opt.lookup ? `${c.opt.lookup.namespace}.${c.opt.lookup.table} → ${c.opt.lookup.labelColumn}` : "—"}</button>`}</td>
+    </tr>`).join("") + "</table>";
+  const jp = document.getElementById("pane-joins");
+  jp.innerHTML = joins.length === 0 ? "<i>JOIN なし(カラムの●同士をドラッグして作成)</i>" :
+    joins.map((j, i) => `<div class="join-row">
+      <select onchange="joins[${i}].type=this.value; refresh()">
+        ${JOIN_TYPES.map(t => `<option ${j.type === t ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <span>${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}</span>
+      <button onclick="joins.splice(${i},1); refresh()">削除</button></div>`).join("");
+  renderSql();
+}
+
+function fqn(p) { return `${p.catalog}.${p.ds}.${p.ns}.${p.tableName}`; }
+
+function renderSql() {
+  const cols = selectedColumns().filter(c => c.opt.visible || c.isKey);
+  let sql = "";
+  if (placed.length > 0) {
+    sql = "SELECT\n" + cols.map(c => `  ${c.key} AS ${c.opt.viewName}`).join(",\n") +
+      `\nFROM ${fqn(placed[0])} ${placed[0].alias}`;
+    const joined = new Set([placed[0].alias]);
+    joins.forEach(j => {
+      const next = joined.has(j.fromAlias) ? j.toAlias : j.fromAlias;
+      const p = placed.find(x => x.alias === next);
+      if (!p || joined.has(next)) return;
+      joined.add(next);
+      sql += `\n${JOIN_SQL[j.type]} ${fqn(p)} ${p.alias} ON ${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+    });
+    placed.filter(p => !joined.has(p.alias)).forEach(p => {
+      sql += `\nCROSS JOIN ${fqn(p)} ${p.alias} -- ⚠ JOIN 条件未定義`;
+    });
+    const sorts = selectedColumns().filter(c => c.opt.sortOrder > 0)
+        .sort((a, b) => a.opt.sortOrder - b.opt.sortOrder);
+    if (sorts.length > 0) {
+      sql += "\nORDER BY " + sorts.map(c => `${c.opt.viewName} ${c.opt.sortDir}`).join(", ");
+    }
+  }
+  document.getElementById("sql").textContent = sql;
+}
+
+// ---- View 作成(POST /api/views) ----
+function buildDefinition() {
+  const cols = selectedColumns();
+  return {
+    viewName: document.getElementById("viewName").value.trim(),
+    catalog: placed.length > 0 ? placed[0].catalog : "",
+    tables: placed.map(p => ({ alias: p.alias, dataSource: p.ds, providerType: p.providerType,
+      namespace: p.ns, table: p.tableName, keyColumns: [...p.pk, ...p.ck] })),
+    joins: joins.map(j => ({ type: j.type, left: j.fromAlias + "." + j.fromCol, right: j.toAlias + "." + j.toCol })),
+    columns: cols.map(c => ({ viewColumn: c.opt.viewName, source: c.key, kind: c.kind, isKey: c.isKey,
+      visible: c.opt.visible, updatable: c.opt.updatable,
+      sortOrder: c.opt.sortOrder || null, sortDir: c.opt.sortOrder > 0 ? c.opt.sortDir : null,
+      via: c.providerType === "scalardb" ? "TX" : "RE",
+      lookup: c.opt.lookup || null })),
+  };
+}
+
+// ---- 選択値(ルックアップ)設定(plan-008) ----
+let LU_KEY = null;          // 設定中の列キー(alias.column)
+let LU_VIEW_COLS = {};      // viewName -> [列名](遅延取得キャッシュ)
+
+/** ソース候補: ScalarDB データソースのテーブル(views ns は除外 = 生一覧で代替)+ 作成済み view */
+function luTableCandidates() {
+  const out = [];
+  CATALOGS.forEach(cat => cat.dataSources.forEach(ds => {
+    if (!ds.scalardb) return;
+    ds.namespaces.forEach(ns => {
+      if (ns.name === "views") return;
+      ns.tables.forEach(t => out.push({
+        namespace: ns.name, table: t.name, columns: t.columns.map(c => c.name) }));
+    });
+  }));
+  return out;
+}
+
+async function openLookup(key) {
+  LU_KEY = key;
+  const opt = colOptions[key];
+  document.getElementById("luTarget").textContent = `対象列: ${key}(View 列名: ${opt.viewName})`;
+  const src = document.getElementById("luSource");
+  const tables = luTableCandidates();
+  let views = [];
+  try {
+    const body = await (await fetch("/api/views")).json();
+    if (body.success) views = body.data.map(v => v.viewName);
+  } catch (e) { /* view 一覧が取れなくてもテーブルだけで続行 */ }
+  src.innerHTML = `<option value="">— ソースを選択 —</option>` +
+      tables.map(t => `<option value="t:${t.namespace}.${t.table}">${t.namespace}.${t.table}</option>`).join("") +
+      views.map(v => `<option value="v:${v}">view: ${v}</option>`).join("");
+  if (opt.lookup) {
+    const cur = opt.lookup.namespace === "views" ? `v:${opt.lookup.table}`
+        : `t:${opt.lookup.namespace}.${opt.lookup.table}`;
+    if ([...src.options].some(o => o.value === cur)) src.value = cur;
+  }
+  await luSourceChanged();
+  if (opt.lookup) {
+    document.getElementById("luKey").value = opt.lookup.keyColumn;
+    document.getElementById("luLabel").value = opt.lookup.labelColumn;
+  }
+  document.getElementById("lookupDialog").showModal();
+}
+
+async function luSourceChanged() {
+  const val = document.getElementById("luSource").value;
+  let cols = [];
+  if (val.startsWith("t:")) {
+    const [ns, table] = val.slice(2).split(".");
+    const t = luTableCandidates().find(x => x.namespace === ns && x.table === table);
+    cols = t ? t.columns : [];
+  } else if (val.startsWith("v:")) {
+    const viewName = val.slice(2);
+    if (!LU_VIEW_COLS[viewName]) {
+      const body = await (await fetch("/api/views/" + encodeURIComponent(viewName))).json();
+      LU_VIEW_COLS[viewName] = body.success
+          ? body.data.definition.columns.map(c => c.viewColumn) : [];
+    }
+    cols = LU_VIEW_COLS[viewName];
+  }
+  const optionsHtml = cols.map(c => `<option>${c}</option>`).join("");
+  document.getElementById("luKey").innerHTML = optionsHtml;
+  document.getElementById("luLabel").innerHTML = optionsHtml;
+}
+
+function saveLookup() {
+  const val = document.getElementById("luSource").value;
+  if (!val) { alert("ソースを選択してください"); return; }
+  const key = document.getElementById("luKey").value;
+  const label = document.getElementById("luLabel").value;
+  const [namespace, table] = val.startsWith("v:")
+      ? ["views", val.slice(2)] : val.slice(2).split(".");
+  colOptions[LU_KEY].lookup = { namespace, table, keyColumn: key, labelColumn: label };
+  document.getElementById("lookupDialog").close();
+  refresh();
+}
+
+function clearLookup() {
+  colOptions[LU_KEY].lookup = null;
+  document.getElementById("lookupDialog").close();
+  refresh();
+}
+
+// ---- 実行結果タブ: SQL を spark で実行してプレビュー(保存しない) ----
+function escapeHtml(v) {
+  return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function runPreview() {
+  const out = document.getElementById("previewOut");
+  const status = document.getElementById("previewStatus");
+  const btn = document.getElementById("previewBtn");
+  if (placed.length === 0) { status.textContent = "テーブルを配置してください"; return; }
+  const def = buildDefinition();
+  if (!def.viewName) def.viewName = "preview"; // 名前は SQL 生成に不要だが検証が要求するため仮置き
+  btn.disabled = true;
+  status.textContent = "実行中…(spark-connect)";
+  out.innerHTML = "";
+  try {
+    const res = await fetch("/api/views/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(def),
+    });
+    const body = await res.json();
+    if (!body.success) {
+      status.textContent = "";
+      out.innerHTML = `<div style="color:#c0392b; padding:4px 0;">${escapeHtml(body.message)}</div>`;
+      return;
+    }
+    const d = body.data;
+    status.textContent = d.limited
+        ? `先頭 ${d.limit} 行を表示(結果はさらにあります)` : `${d.rowCount} 行`;
+    if (d.rows.length === 0) {
+      out.innerHTML = "<i>0 行</i>";
+      return;
+    }
+    const cols = Object.keys(d.rows[0]);
+    out.innerHTML = `<table class="grid"><tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`
+        + d.rows.map(r => `<tr>${cols.map(c => `<td>${escapeHtml(r[c] ?? "")}</td>`).join("")}</tr>`).join("")
+        + "</table>";
+  } catch (e) {
+    status.textContent = "";
+    out.innerHTML = `<div style="color:#c0392b; padding:4px 0;">${escapeHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function createView() {
+  const def = buildDefinition();
+  if (!def.viewName) { setError("View 名を入力してください"); return; }
+  if (placed.length === 0) { setError("テーブルを配置してください"); return; }
+  // 編集モードで名前が変わっていたら「複製して新規作成」(元 View はそのまま。モジュールはコピーしない)
+  const isDuplicate = editView && def.viewName !== editView;
+  if (isDuplicate) {
+    if (!confirm(`「${editView}」はそのまま残し、この定義で新しい View「${def.viewName}」を複製作成します。`
+        + "(更新モジュールはコピーされません)よろしいですか?")) return;
+  } else if (editView && !confirm("実体テーブルを作り直して再マテリアライズします。"
+      + "更新モジュールは維持されます(列構成を変えた場合は参照列を確認してください)。よろしいですか?")) return;
+  const isUpdate = editView && !isDuplicate;
+  setStatus(isUpdate ? "保存中…(実体再作成 + 再マテリアライズ)" : "保存中…(spark-connect でマテリアライズしています)");
+  const res = await fetch(isUpdate ? "/api/views/" + editView : "/api/views", {
+    method: isUpdate ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(def),
+  });
+  const body = await res.json();
+  setStatus("");
+  document.getElementById("resultTitle").textContent = body.success
+      ? (isDuplicate ? `View 複製完了(${editView} → ${def.viewName})`
+          : isUpdate ? "View 保存完了(再作成 + 再マテリアライズ)" : "View 作成完了") : "保存エラー";
+  document.getElementById("resultOut").textContent = body.success
+      ? JSON.stringify(body.data, null, 2) : body.message;
+  document.getElementById("resultLinks").innerHTML = body.success
+      ? `<a href="update-module.html?view=${def.viewName}">→ 更新モジュール</a> /
+         <a href="data-edit.html?view=${def.viewName}">→ データ編集画面で開く</a>` : "";
+  document.getElementById("resultDialog").showModal();
+}
+
+// ---- 編集モード: ?view=<名> で既存定義をロードして復元 ----
+const editView = new URLSearchParams(location.search).get("view");
+
+async function initEditMode() {
+  if (!editView) return;
+  const res = await fetch("/api/views/" + encodeURIComponent(editView));
+  const body = await res.json();
+  if (!body.success) {
+    setError(body.message + " — ホームの View 一覧から選び直してください");
+    document.getElementById("createBtn").disabled = true;
+    return;
+  }
+  const def = body.data.definition;
+  const nameInput = document.getElementById("viewName");
+  nameInput.value = def.viewName;
+  nameInput.title = "名前を変えて保存すると、この定義を複製した新しい View を作成します(更新モジュールはコピーされません)";
+  document.getElementById("createBtn").textContent = "保存 (実体再作成 + 再マテリアライズ)";
+  document.getElementById("refreshBtn").hidden = false;
+  document.getElementById("dataEditLink").href = "data-edit.html?view=" + encodeURIComponent(editView);
+
+  // 列マッピングのオプションを先に復元(addTable の selectedColumns で拾われる)
+  def.columns.forEach(c => {
+    colOptions[c.source] = { viewName: c.viewColumn, visible: c.visible, updatable: c.updatable,
+        sortOrder: c.sortOrder || 0, sortDir: c.sortDir || "ASC", lookup: c.lookup || null };
+  });
+  // テーブルを定義順に配置(位置情報は保存していないため格子状に自動配置)
+  let x = 60, y = 40;
+  for (const t of def.tables) {
+    const selected = def.columns.filter(c => c.source.startsWith(t.alias + "."))
+        .map(c => c.source.split(".")[1]);
+    await addTable(
+        { catalog: def.catalog, ds: t.dataSource, providerType: t.providerType,
+          scalardb: t.providerType === "scalardb", ns: t.namespace, table: t.table },
+        x, y, { alias: t.alias, keyColumns: t.keyColumns, selected });
+    x += 340;
+    if (x > 1000) { x = 60; y += 280; }
+  }
+  (def.joins || []).forEach(j => {
+    const [fa, fc] = [j.left.substring(0, j.left.indexOf(".")), j.left.substring(j.left.indexOf(".") + 1)];
+    const [ta, tc] = [j.right.substring(0, j.right.indexOf(".")), j.right.substring(j.right.indexOf(".") + 1)];
+    joins.push({ fromAlias: fa, fromCol: fc, toAlias: ta, toCol: tc, type: j.type });
+  });
+  refresh();
+}
+
+function setStatus(text) {
+  const el = document.getElementById("status");
+  el.className = "";
+  el.textContent = text;
+}
+
+function setError(text) {
+  const el = document.getElementById("status");
+  el.className = "ng";
+  el.textContent = text;
+}
+
+/** 編集モード限定: 実体を truncate して再マテリアライズ */
+async function refreshView() {
+  if (!editView) return;
+  setStatus("リフレッシュ中…(spark-connect 再クエリ)");
+  const res = await fetch("/api/views/" + encodeURIComponent(editView) + "/refresh", { method: "POST" });
+  const body = await res.json();
+  if (body.success) {
+    setStatus(`リフレッシュ完了: ${body.data.rows} 行`);
+    setTimeout(() => setStatus(""), 4000);
+  } else {
+    setError("リフレッシュエラー: " + body.message);
+  }
+}
+
+function selectTab(el) {
+  document.querySelectorAll("#tabs div").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById(el.dataset.pane).classList.add("active");
+}
+</script>
+</body>
+</html>

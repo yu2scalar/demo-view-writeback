@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>demo-view-writeback</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; background: #f4f5f7;
+         margin: 0; min-height: 100vh; }
+  header { background: #2c3e50; color: #fff; padding: 12px 24px; display: flex;
+           align-items: baseline; gap: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: #aab7c4; font-size: 12px; }
+  #wrap { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
+  .section { background: #fff; border: 1px solid #ddd; border-radius: 8px;
+             padding: 18px 24px; margin-bottom: 20px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+  .section h2 { font-size: 15px; margin: 0 0 4px; color: #2c3e50; }
+  .section p.desc { color: #888; font-size: 12px; margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid #e4e8ec; padding: 7px 10px; text-align: left; }
+  th { background: #f7f9fb; color: #556; font-weight: 600; font-size: 12px; }
+  tr.rowlink { cursor: pointer; }
+  tr.rowlink:hover { background: #eaf2fb; }
+  .empty { color: #999; font-size: 13px; padding: 10px 4px; }
+  button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer;
+           font-size: 12px; color: #fff; }
+  .primary { background: #2f80d0; }
+  .primary:hover { background: #2a71b8; }
+  .ghost { background: #7f8c9b; }
+  .danger { background: #c0392b; }
+  .linkbtn { background: #5b9bd5; margin-right: 4px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .badge.on { background: #d9f2e3; color: #1e8449; }
+  .badge.off { background: #eee; color: #888; }
+  #msg { font-size: 12px; margin: 10px 0 0; min-height: 1em; }
+  #msg.ok { color: #27ae60; }
+  #msg.ng { color: #c0392b; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>demo-view-writeback</h1>
+  <span class="sub">ScalarDB Analytics カタログ + spark-connect + ScalarDB Tx / ScalarRE write-back</span>
+</header>
+<div id="wrap">
+
+  <div class="section">
+    <h2>Admin — View の定義・管理</h2>
+    <p class="desc">View の作成・定義編集・更新モジュール・リフレッシュ(再マテリアライズ)・削除</p>
+    <div class="toolbar">
+      <button class="primary" onclick="location.href='view-builder.html'">+ 新規 View</button>
+      <span style="margin-left:auto"></span>
+      <button class="ghost" onclick="setup()" title="viewmgr / views namespace を作成(初回のみ)">初期セットアップ</button>
+    </div>
+    <table>
+      <thead><tr><th>View 名</th><th>状態</th><th>最終マテリアライズ</th><th>更新モジュール</th><th style="width:260px">操作</th></tr></thead>
+      <tbody id="adminRows"></tbody>
+    </table>
+    <div id="adminEmpty" class="empty" hidden>View がありません。「+ 新規 View」から作成してください。</div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="section">
+    <h2>User — データの参照・更新</h2>
+    <p class="desc">View を選ぶとデータ編集画面(グリッド編集 → TX write-back / RE キュー)が開きます</p>
+    <table>
+      <thead><tr><th>View 名</th><th>最終マテリアライズ</th><th>更新モジュール</th></tr></thead>
+      <tbody id="userRows"></tbody>
+    </table>
+    <div id="userEmpty" class="empty" hidden>View がありません(Admin で作成してください)。</div>
+  </div>
+
+  <div class="section">
+    <h2>外部システム — 変更リクエストの承認(模擬)</h2>
+    <p class="desc">RE で届いた変更リクエストを外部システム側の担当者として処理します(許可 → 自システムの DB を更新 + SUCCEEDED 返送 / 却下 → REJECTED 返送)</p>
+    <div class="toolbar" style="margin-bottom:0;">
+      <button class="primary" onclick="window.open('external-system.html', '_blank')"
+              title="Namespace(erp / payroll)を選んで inbox のリクエストを許可/却下する">
+        外部システムコンソール(模擬)を開く</button>
+    </div>
+  </div>
+
+</div>
+<script>
+function fmt(ts) { return ts ? new Date(ts).toLocaleString("ja-JP") : "-"; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function moduleBadge(v) {
+  return v.hasModule ? '<span class="badge on">あり</span>' : '<span class="badge off">未定義</span>';
+}
+
+async function load() {
+  const res = await fetch("/api/views");
+  const body = await res.json();
+  if (!body.success) { setMsg(false, "View 一覧の取得に失敗しました: " + body.message); return; }
+  const views = body.data;
+  const admin = document.getElementById("adminRows");
+  const user = document.getElementById("userRows");
+  admin.innerHTML = views.map(v => `
+    <tr>
+      <td><strong>${esc(v.viewName)}</strong></td>
+      <td>${esc(v.status ?? "-")}</td>
+      <td>${fmt(v.refreshedAt)}</td>
+      <td>${moduleBadge(v)}</td>
+      <td>
+        <button class="linkbtn" onclick="location.href='view-builder.html?view=${encodeURIComponent(v.viewName)}'">編集</button>
+        <button class="linkbtn" onclick="location.href='update-module.html?view=${encodeURIComponent(v.viewName)}'">更新モジュール</button>
+        <button class="danger" onclick="del('${esc(v.viewName)}')">削除</button>
+      </td>
+    </tr>`).join("");
+  user.innerHTML = views.map(v => `
+    <tr class="rowlink" onclick="location.href='data-edit.html?view=${encodeURIComponent(v.viewName)}'">
+      <td><strong>${esc(v.viewName)}</strong></td>
+      <td>${fmt(v.refreshedAt)}</td>
+      <td>${moduleBadge(v)}</td>
+    </tr>`).join("");
+  document.getElementById("adminEmpty").hidden = views.length > 0;
+  document.getElementById("userEmpty").hidden = views.length > 0;
+}
+
+async function del(name) {
+  if (!confirm(`View '${name}' を削除します(実体テーブル・定義・更新モジュール)。よろしいですか?`)) return;
+  const res = await fetch("/api/views/" + encodeURIComponent(name), { method: "DELETE" });
+  const body = await res.json();
+  setMsg(body.success, body.success ? `View '${name}' を削除しました` : "削除エラー: " + body.message);
+  load();
+}
+
+async function setup() {
+  setMsg(true, "セットアップ中…");
+  const res = await fetch("/api/admin/setup", { method: "POST" });
+  const body = await res.json();
+  setMsg(body.success, body.success ? "セットアップ完了" : body.message);
+  load();
+}
+
+function setMsg(ok, text) {
+  const el = document.getElementById("msg");
+  el.className = ok ? "ok" : "ng";
+  el.textContent = text;
+}
+
+load();
+</script>
+</body>
+</html>

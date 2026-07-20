@@ -1,0 +1,45 @@
+# ScalarDB Cluster 3.18.0(chart 1.11.1)— .130 minikube 用
+# ライセンスは Secret `scalardb-credentials` から env 注入(values にベタ書きしない):
+#   source config/set_license.sh
+#   kubectl create secret generic scalardb-credentials \
+#     --from-literal=SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_KEY="$CLUSTER_LICENSE_KEY" \
+#     --from-literal=SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_CHECK_CERT_PEM="$LICENSE_CHECK_CERT"
+# ホストからは indirect:192.168.49.2 + contact_port 30053(envoy NodePort)
+envoy:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: NodePort
+    ports:
+      envoy:
+        port: 60053
+        targetPort: 60053
+        protocol: TCP
+        nodePort: 30053
+
+scalardbCluster:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/scalar-labs/scalardb-cluster-node-byol-premium
+    tag: "3.18.0"
+  secretName: scalardb-credentials
+  scalardbClusterNodeProperties: |
+    scalar.db.cluster.membership.type=KUBERNETES
+    scalar.db.cluster.membership.kubernetes.endpoint.namespace_name=${env:SCALAR_DB_CLUSTER_MEMBERSHIP_KUBERNETES_ENDPOINT_NAMESPACE_NAME}
+    scalar.db.cluster.membership.kubernetes.endpoint.name=${env:SCALAR_DB_CLUSTER_MEMBERSHIP_KUBERNETES_ENDPOINT_NAME}
+    scalar.db.storage=multi-storage
+    scalar.db.multi_storage.storages=mysql,postgres
+    scalar.db.multi_storage.storages.mysql.storage=jdbc
+    scalar.db.multi_storage.storages.mysql.contact_points=jdbc:mysql://mysql-scalardb.default.svc.cluster.local:3306/
+    scalar.db.multi_storage.storages.mysql.username=root
+    scalar.db.multi_storage.storages.mysql.password=mysql
+    scalar.db.multi_storage.storages.postgres.storage=jdbc
+    scalar.db.multi_storage.storages.postgres.contact_points=jdbc:postgresql://postgresql-scalardb-analytics.default.svc.cluster.local:5432/erpdb
+    scalar.db.multi_storage.storages.postgres.username=scalaradmin
+    scalar.db.multi_storage.storages.postgres.password=scalaradmin
+    scalar.db.multi_storage.namespace_mapping=erp:postgres,payroll:postgres
+    scalar.db.multi_storage.default_storage=mysql
+    scalar.db.cross_partition_scan.enabled=true
+    scalar.db.cluster.auth.enabled=true
+    scalar.db.cluster.node.licensing.license_key=${env:SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_KEY}
+    scalar.db.cluster.node.licensing.license_check_cert_pem=${env:SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_CHECK_CERT_PEM}

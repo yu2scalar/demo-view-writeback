@@ -71,6 +71,9 @@ public class UpdateEngine {
 
     public Map<String, Object> update(String viewName, Map<String, Object> rawRow) {
         ViewDefinition def = meta.viewDef(viewName);
+        if (def.isAggregate()) {
+            throw new CustomException("集計 view は read-only です(更新できません): " + viewName, 400);
+        }
         FlowDefinition flow = loadFlow(viewName);
 
         // 1. 入力の検証と型変換(view スキーマ)

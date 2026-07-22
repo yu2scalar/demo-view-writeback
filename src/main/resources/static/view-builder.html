@@ -100,11 +100,13 @@
       <div id="tabs">
         <div class="active" data-pane="pane-cols" onclick="selectTab(this)">列マッピング</div>
         <div data-pane="pane-joins" onclick="selectTab(this)">JOIN</div>
+        <div data-pane="pane-filter" onclick="selectTab(this)">フィルタ</div>
         <div data-pane="pane-sql" onclick="selectTab(this)">SQL</div>
         <div data-pane="pane-result" onclick="selectTab(this)">実行結果</div>
       </div>
       <div id="pane-cols" class="pane active"></div>
       <div id="pane-joins" class="pane"></div>
+      <div id="pane-filter" class="pane"></div>
       <div id="pane-sql" class="pane"><pre id="sql"></pre></div>
       <div id="pane-result" class="pane">
         <div style="padding: 6px 0;">
@@ -146,7 +148,15 @@ let CATALOGS = [];       // /api/catalog の応答
 const placed = [];       // {alias, catalog, ds, providerType, ns, tableName, columns, pk, ck, keysKnown, x, y, el, selected}
 const joins = [];
 const colOptions = {};
+const filters = [];      // plan-011: 静的 WHERE 条件 [{source, operator, value, kind}]
 let aliasSeq = 0;
+const AGG_FUNCS = ["SUM", "COUNT", "AVG", "MIN", "MAX"];
+const FILTER_OPS = ["=", "<>", ">", ">=", "<", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"];
+
+/** plan-011: いずれかの列に集計関数が設定されていれば集計 view(read-only) */
+function isAggMode() {
+  return Object.values(colOptions).some(o => o.aggregate && o.aggregate !== "");
+}
 const JOIN_TYPES = ["INNER", "LEFT", "RIGHT", "FULL"];
 const JOIN_SQL = { INNER: "INNER JOIN", LEFT: "LEFT OUTER JOIN", RIGHT: "RIGHT OUTER JOIN", FULL: "FULL OUTER JOIN" };
 const JOIN_COLOR = { INNER: "#2980b9", LEFT: "#8e44ad", RIGHT: "#16a085", FULL: "#e67e22" };
@@ -264,7 +274,9 @@ function renderCard(entry) {
     const row = document.createElement("div");
     row.className = "col-row";
     const isKey = entry.pk.includes(col.name) || entry.ck.includes(col.name);
-    row.innerHTML = `<input type="checkbox" ${isKey ? "checked disabled" : entry.selected.has(col.name) ? "checked" : ""}>
+    // 集計モードではソースキー列も除外できる(テーブルの PK を跨いで集計するため)
+    const lockKey = isKey && !isAggMode();
+    row.innerHTML = `<input type="checkbox" ${lockKey ? "checked disabled" : entry.selected.has(col.name) ? "checked" : ""}>
       <span class="keyicon ${entry.keysKnown ? "" : "togglable"}" title="${entry.keysKnown ? "" : "クリックでキー指定/解除"}">${keyMark(entry, col.name)}</span>
       <span>${col.name}</span><span class="kind">${col.kind}</span><span class="handle" title="ドラッグで JOIN"></span>`;
     const cb = row.querySelector("input");
@@ -457,15 +469,18 @@ canvas.addEventListener("mousedown", ev => {
 // ---- 列マッピング / JOIN 一覧 / SQL ----
 function selectedColumns() {
   const cols = [];
+  const agg = isAggMode();
   placed.forEach(p => p.columns.forEach(c => {
     const isKey = p.pk.includes(c.name) || p.ck.includes(c.name);
-    if (!p.selected.has(c.name) && !isKey) return;
+    // 非集計はキー列を常に含める。集計 view はキー列も選択制(グループ軸をユーザーが決める)
+    if (!p.selected.has(c.name) && !(isKey && !agg)) return;
     const key = p.alias + "." + c.name;
     if (!colOptions[key]) {
       colOptions[key] = { viewName: placed.length > 1 ? p.alias + "_" + c.name : c.name,
-                          visible: true, updatable: false, sortOrder: 0, sortDir: "ASC" };
+                          visible: true, updatable: false, sortOrder: 0, sortDir: "ASC", aggregate: "" };
     }
-    cols.push({ key, alias: p.alias, col: c.name, kind: c.kind, isKey, providerType: p.providerType, opt: colOptions[key] });
+    cols.push({ key, alias: p.alias, col: c.name, kind: c.kind,
+                isKey: isKey && !agg, providerType: p.providerType, opt: colOptions[key] });
   }));
   return cols;
 }
@@ -473,16 +488,23 @@ function selectedColumns() {
 function refresh() {
   drawWires();
   const cols = selectedColumns();
+  const agg = isAggMode();
   const usedSortNums = cols.map(c => c.opt.sortOrder).filter(n => n > 0);
   const pane = document.getElementById("pane-cols");
-  pane.innerHTML = `<table class="grid"><tr><th>View 列名</th><th>ソース</th><th>型</th><th>キー</th>
+  pane.innerHTML = (agg ? `<div style="padding:2px 0 6px; color:#8e44ad;">集計 view(read-only)
+      — 「集計」が「—」の列が GROUP BY キー、関数指定の列が集計値になります</div>` : "") +
+    `<table class="grid"><tr><th>View 列名</th><th>ソース</th><th>型</th><th>集計</th><th>キー</th>
     <th>表示</th><th>更新可</th><th>ソート順</th><th>昇降</th><th>経路</th><th>選択値</th></tr>` +
     cols.map(c => `<tr>
       <td><input type="text" value="${c.opt.viewName}" onchange="colOptions['${c.key}'].viewName=this.value; renderSql()"></td>
       <td>${c.key}</td><td>${c.kind}</td>
-      <td>${c.isKey ? "🔑 (除外不可)" : ""}</td>
+      <td><select onchange="setAggregate('${c.key}', this.value)">
+        <option value="" ${!c.opt.aggregate ? "selected" : ""}>—</option>
+        ${AGG_FUNCS.map(f => `<option value="${f}" ${c.opt.aggregate === f ? "selected" : ""}>${f}</option>`).join("")}
+      </select></td>
+      <td>${c.isKey ? "🔑 (除外不可)" : agg && (!c.opt.aggregate) ? "GROUP BY" : ""}</td>
       <td><input type="checkbox" ${c.opt.visible ? "checked" : ""} onchange="colOptions['${c.key}'].visible=this.checked"></td>
-      <td><input type="checkbox" ${c.opt.updatable ? "checked" : ""} ${c.isKey ? "disabled" : ""}
+      <td><input type="checkbox" ${c.opt.updatable && !agg ? "checked" : ""} ${c.isKey || agg ? "disabled" : ""}
           onchange="colOptions['${c.key}'].updatable=this.checked"></td>
       <td><select onchange="colOptions['${c.key}'].sortOrder=+this.value; refresh()">
         <option value="0">—</option>
@@ -505,16 +527,86 @@ function refresh() {
       </select>
       <span>${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}</span>
       <button onclick="joins.splice(${i},1); refresh()">削除</button></div>`).join("");
+  renderFilters();
   renderSql();
+}
+
+/** plan-011: 集計関数の設定。集計モードが変わったらカードを再描画(キー列の選択可否が変わる) */
+function setAggregate(key, val) {
+  const before = isAggMode();
+  if (colOptions[key]) colOptions[key].aggregate = val;
+  if (isAggMode() !== before) {
+    placed.forEach(p => { if (p.el) p.el.remove(); renderCard(p); });
+  }
+  refresh();
+}
+
+/** plan-011: フィルタ(静的 WHERE)ペインの描画 */
+function renderFilters() {
+  const cols = selectedColumns();
+  const pane = document.getElementById("pane-filter");
+  const noVal = op => op === "IS NULL" || op === "IS NOT NULL";
+  pane.innerHTML = `<div style="padding:2px 0 6px; color:#555;">列ごとの条件を AND で結合して WHERE に適用します
+      （集計 view では GROUP BY 前の絞り込み）。IN はカンマ区切り。</div>` +
+    filters.map((f, i) => `<div class="join-row">
+      <select onchange="filters[${i}].source=this.value; filters[${i}].kind=filterKind(this.value); renderSql()">
+        <option value="">— 列 —</option>
+        ${cols.map(c => `<option value="${c.key}" ${f.source === c.key ? "selected" : ""}>${c.key}</option>`).join("")}
+      </select>
+      <select onchange="filters[${i}].operator=this.value; renderFilters(); renderSql()">
+        ${FILTER_OPS.map(op => `<option ${f.operator === op ? "selected" : ""}>${op}</option>`).join("")}
+      </select>
+      <input type="text" value="${f.value ? f.value.replace(/"/g, "&quot;") : ""}" placeholder="値"
+        ${noVal(f.operator) ? "disabled" : ""}
+        onchange="filters[${i}].value=this.value; renderSql()">
+      <button onclick="filters.splice(${i},1); renderFilters(); renderSql()">削除</button>
+    </div>`).join("") +
+    `<div style="padding-top:6px;"><button onclick="addFilter()">+ 条件を追加</button></div>`;
+}
+
+function addFilter() {
+  const cols = selectedColumns();
+  const first = cols.length > 0 ? cols[0].key : "";
+  filters.push({ source: first, operator: "=", value: "", kind: filterKind(first) });
+  renderFilters();
+  renderSql();
+}
+
+/** source(alias.column)から列の型を引く(リテラル化のため) */
+function filterKind(source) {
+  const c = selectedColumns().find(x => x.key === source);
+  return c ? c.kind : "TEXT";
 }
 
 function fqn(p) { return `${p.catalog}.${p.ds}.${p.ns}.${p.tableName}`; }
 
+function selectExprPreview(c) {
+  if (!c.opt.aggregate) return c.key;
+  return `${c.opt.aggregate}(${c.key})`;
+}
+
+function whereClausePreview() {
+  const conds = filters.filter(f => f.source && f.operator).map(f => {
+    const op = f.operator;
+    if (op === "IS NULL" || op === "IS NOT NULL") return `${f.source} ${op}`;
+    const numeric = ["INT", "BIGINT", "FLOAT", "DOUBLE"].includes((f.kind || "").toUpperCase());
+    if (op === "IN") {
+      const parts = (f.value || "").split(",").map(v => v.trim()).filter(v => v !== "")
+          .map(v => numeric ? v : `'${v.replace(/'/g, "''")}'`);
+      return `${f.source} IN (${parts.join(", ")})`;
+    }
+    const lit = numeric ? (f.value || "") : `'${(f.value || "").replace(/'/g, "''")}'`;
+    return `${f.source} ${op} ${lit}`;
+  });
+  return conds.join(" AND ");
+}
+
 function renderSql() {
-  const cols = selectedColumns().filter(c => c.opt.visible || c.isKey);
+  const agg = isAggMode();
+  const cols = selectedColumns().filter(c => c.opt.visible || c.isKey || (agg && !c.opt.aggregate));
   let sql = "";
   if (placed.length > 0) {
-    sql = "SELECT\n" + cols.map(c => `  ${c.key} AS ${c.opt.viewName}`).join(",\n") +
+    sql = "SELECT\n" + cols.map(c => `  ${selectExprPreview(c)} AS ${c.opt.viewName}`).join(",\n") +
       `\nFROM ${fqn(placed[0])} ${placed[0].alias}`;
     const joined = new Set([placed[0].alias]);
     joins.forEach(j => {
@@ -527,6 +619,13 @@ function renderSql() {
     placed.filter(p => !joined.has(p.alias)).forEach(p => {
       sql += `\nCROSS JOIN ${fqn(p)} ${p.alias} -- ⚠ JOIN 条件未定義`;
     });
+    const where = whereClausePreview();
+    if (where) sql += "\nWHERE " + where;
+    if (agg) {
+      const groupBy = selectedColumns().filter(c => (c.opt.visible || c.isKey) && !c.opt.aggregate)
+          .map(c => c.key);
+      if (groupBy.length > 0) sql += "\nGROUP BY " + groupBy.join(", ");
+    }
     const sorts = selectedColumns().filter(c => c.opt.sortOrder > 0)
         .sort((a, b) => a.opt.sortOrder - b.opt.sortOrder);
     if (sorts.length > 0) {
@@ -539,17 +638,27 @@ function renderSql() {
 // ---- View 作成(POST /api/views) ----
 function buildDefinition() {
   const cols = selectedColumns();
+  const agg = isAggMode();
   return {
     viewName: document.getElementById("viewName").value.trim(),
     catalog: placed.length > 0 ? placed[0].catalog : "",
     tables: placed.map(p => ({ alias: p.alias, dataSource: p.ds, providerType: p.providerType,
       namespace: p.ns, table: p.tableName, keyColumns: [...p.pk, ...p.ck] })),
     joins: joins.map(j => ({ type: j.type, left: j.fromAlias + "." + j.fromCol, right: j.toAlias + "." + j.toCol })),
-    columns: cols.map(c => ({ viewColumn: c.opt.viewName, source: c.key, kind: c.kind, isKey: c.isKey,
-      visible: c.opt.visible, updatable: c.opt.updatable,
+    columns: cols.map(c => ({ viewColumn: c.opt.viewName, source: c.key, kind: c.kind,
+      isKey: agg ? false : c.isKey,
+      visible: c.opt.visible, updatable: agg ? false : c.opt.updatable,
       sortOrder: c.opt.sortOrder || null, sortDir: c.opt.sortOrder > 0 ? c.opt.sortDir : null,
       via: c.providerType === "scalardb" ? "TX" : "RE",
-      lookup: c.opt.lookup || null })),
+      lookup: agg ? null : (c.opt.lookup || null),
+      aggregate: c.opt.aggregate || null })),
+    filters: filters.filter(f => f.source && f.operator).map(f => {
+      const op = f.operator;
+      const base = { source: f.source, operator: op, kind: f.kind || "TEXT" };
+      if (op === "IS NULL" || op === "IS NOT NULL") return base;
+      if (op === "IN") return { ...base, values: (f.value || "").split(",").map(v => v.trim()).filter(v => v !== "") };
+      return { ...base, value: f.value };
+    }),
   };
 }
 
@@ -707,8 +816,10 @@ async function createView() {
   document.getElementById("resultOut").textContent = body.success
       ? JSON.stringify(body.data, null, 2) : body.message;
   document.getElementById("resultLinks").innerHTML = body.success
-      ? `<a href="update-module.html?view=${def.viewName}">→ 更新モジュール</a> /
-         <a href="data-edit.html?view=${def.viewName}">→ データ編集画面で開く</a>` : "";
+      ? (isAggMode()
+          ? `<a href="data-edit.html?view=${def.viewName}">→ データ編集画面で開く(read-only)</a>`
+          : `<a href="update-module.html?view=${def.viewName}">→ 更新モジュール</a> /
+             <a href="data-edit.html?view=${def.viewName}">→ データ編集画面で開く</a>`) : "";
   document.getElementById("resultDialog").showModal();
 }
 
@@ -735,8 +846,13 @@ async function initEditMode() {
   // 列マッピングのオプションを先に復元(addTable の selectedColumns で拾われる)
   def.columns.forEach(c => {
     colOptions[c.source] = { viewName: c.viewColumn, visible: c.visible, updatable: c.updatable,
-        sortOrder: c.sortOrder || 0, sortDir: c.sortDir || "ASC", lookup: c.lookup || null };
+        sortOrder: c.sortOrder || 0, sortDir: c.sortDir || "ASC", lookup: c.lookup || null,
+        aggregate: c.aggregate || "" };
   });
+  // 静的 WHERE(plan-011)を復元
+  (def.filters || []).forEach(f => filters.push({
+    source: f.source, operator: f.operator, kind: f.kind || "TEXT",
+    value: f.operator === "IN" ? (f.values || []).join(",") : (f.value || "") }));
   // テーブルを定義順に配置(位置情報は保存していないため格子状に自動配置)
   let x = 60, y = 40;
   for (const t of def.tables) {

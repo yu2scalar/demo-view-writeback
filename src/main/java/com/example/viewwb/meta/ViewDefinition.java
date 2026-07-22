@@ -15,7 +15,41 @@ public record ViewDefinition(
         String catalog,
         List<TableRef> tables,
         List<JoinDef> joins,
-        List<ColumnDef> columns) {
+        List<ColumnDef> columns,
+        List<FilterCond> filters) {   // plan-011: 静的 WHERE(null/空 = フィルタなし)
+
+    /** plan-011: カラムフィルタ 1 条件(列 演算子 値)。source = "alias.column"(集計前のソース列)。 */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record FilterCond(
+            String source,
+            String operator,      // =, <>, >, >=, <, <=, LIKE, IN, IS NULL, IS NOT NULL
+            String value,         // 単値(IS NULL / IS NOT NULL は無視)
+            List<String> values,  // IN 用
+            String kind) {        // リテラル化のための型(INT/TEXT/...)。builder が付与
+
+        public String alias() {
+            return source == null || !source.contains(".") ? null
+                    : source.substring(0, source.indexOf('.'));
+        }
+
+        public String column() {
+            return source == null || !source.contains(".") ? null
+                    : source.substring(source.indexOf('.') + 1);
+        }
+    }
+
+    /** plan-011: いずれかの列が集計関数を持てば集計 view(read-only)。 */
+    public boolean isAggregate() {
+        return columns != null && columns.stream().anyMatch(ColumnDef::hasAggregate);
+    }
+
+    /** plan-011: 集計 view の GROUP BY 列(= 集計関数を持たない出力列)。 */
+    public List<ColumnDef> groupColumns() {
+        return columns.stream().filter(c -> !c.hasAggregate()).toList();
+    }
+
+    /** plan-011: 集計 view 実体の内部 PK 列名(GROUP BY 列値の連結キー)。 */
+    public static final String GROUP_PK = "_group_pk";
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record TableRef(
@@ -64,7 +98,8 @@ public record ViewDefinition(
             Integer sortOrder,    // null = 未指定
             String sortDir,       // ASC / DESC(sortOrder 指定時のみ)
             String via,           // TX / RE
-            LookupDef lookup) {   // null = 選択値なし
+            LookupDef lookup,     // null = 選択値なし
+            String aggregate) {   // plan-011: 集計関数名(SUM/COUNT/...)。null/空 = GROUP BY キー列
 
         public String sourceAlias() {
             return source.substring(0, source.indexOf('.'));
@@ -72,6 +107,11 @@ public record ViewDefinition(
 
         public String sourceColumn() {
             return source.substring(source.indexOf('.') + 1);
+        }
+
+        /** plan-011: 集計列か(集計関数を持つか)。 */
+        public boolean hasAggregate() {
+            return aggregate != null && !aggregate.isBlank();
         }
     }
 
@@ -129,9 +169,6 @@ public record ViewDefinition(
         if (columns == null || columns.isEmpty()) {
             throw new CustomException("view must define at least one column", 400);
         }
-        if (keyColumns().isEmpty()) {
-            throw new CustomException("view must contain key columns", 400);
-        }
         long distinctNames = columns.stream().map(ColumnDef::viewColumn).distinct().count();
         if (distinctNames != columns.size()) {
             throw new CustomException("View 列名が重複しています", 400);
@@ -141,6 +178,24 @@ public record ViewDefinition(
                 throw new CustomException("column source must be alias.column: " + c.source(), 400);
             }
             table(c.sourceAlias());
+        }
+        if (tables.size() > 1 && (joins == null || joins.isEmpty())) {
+            throw new CustomException("multi-table view requires join definitions", 400);
+        }
+        validateFilters();
+        if (isAggregate()) {
+            validateAggregate();
+        } else {
+            validateUpdatableView();
+        }
+    }
+
+    /** 非集計(更新可能)view の検証(従来ルール): 実体 PK = テーブルごとの <alias>_pk。 */
+    private void validateUpdatableView() {
+        if (keyColumns().isEmpty()) {
+            throw new CustomException("view must contain key columns", 400);
+        }
+        for (ColumnDef c : columns) {
             if (c.isKey() && c.updatable()) {
                 throw new CustomException("key column cannot be updatable: " + c.viewColumn(), 400);
             }
@@ -153,9 +208,6 @@ public record ViewDefinition(
                 }
             }
         }
-        if (tables.size() > 1 && (joins == null || joins.isEmpty())) {
-            throw new CustomException("multi-table view requires join definitions", 400);
-        }
         for (TableRef t : tables) {
             if (t.keyColumns() == null || t.keyColumns().isEmpty()) {
                 throw new CustomException("テーブル '" + t.alias() + "' に keyColumns がありません", 400);
@@ -165,6 +217,44 @@ public record ViewDefinition(
             if (columns.stream().anyMatch(c -> c.viewColumn().equals(reserved))) {
                 throw new CustomException("View 列名 '" + reserved
                         + "' は内部キー列として予約されています", 400);
+            }
+        }
+    }
+
+    /** plan-011: 集計 view(read-only)の検証。実体 PK = GROUP BY 列連結の _group_pk。 */
+    private void validateAggregate() {
+        if (columns.stream().noneMatch(ColumnDef::hasAggregate)) {
+            throw new CustomException("集計 view には集計列が 1 つ以上必要です", 400);
+        }
+        for (ColumnDef c : columns) {
+            if (c.hasAggregate() && c.updatable()) {
+                throw new CustomException("集計列は更新できません: " + c.viewColumn(), 400);
+            }
+            if (c.updatable()) {
+                throw new CustomException("集計 view は read-only です(更新可: " + c.viewColumn() + ")", 400);
+            }
+            if (c.lookup() != null) {
+                throw new CustomException("集計 view の列に lookup は指定できません: " + c.viewColumn(), 400);
+            }
+        }
+        if (columns.stream().anyMatch(c -> GROUP_PK.equals(c.viewColumn()))) {
+            throw new CustomException("View 列名 '" + GROUP_PK + "' は内部キー列として予約されています", 400);
+        }
+    }
+
+    /** plan-011: フィルタ条件の構文検証(値のリテラル化と SQL 生成は SqlGenerator)。 */
+    private void validateFilters() {
+        if (filters == null) {
+            return;
+        }
+        for (FilterCond f : filters) {
+            if (f.alias() == null || f.column() == null) {
+                throw new CustomException("フィルタの source は alias.column 形式が必要です: "
+                        + f.source(), 400);
+            }
+            table(f.alias()); // alias 実在検証
+            if (!f.column().matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                throw new CustomException("フィルタ列名が不正です: " + f.column(), 400);
             }
         }
     }

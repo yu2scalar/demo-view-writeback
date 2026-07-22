@@ -106,6 +106,10 @@ public class ViewController {
     @PutMapping("/{viewName}/module")
     public ApiResponse<Void> saveModule(@PathVariable String viewName, @RequestBody String flowJson) {
         meta.viewDefRow(viewName); // 404 チェック
+        if (meta.viewDef(viewName).isAggregate()) {
+            throw new com.example.viewwb.exception.CustomException(
+                    "集計 view は read-only のため更新モジュールを登録できません: " + viewName, 400);
+        }
         meta.saveModule(viewName, flowJson);
         return ApiResponse.success("Update module saved");
     }

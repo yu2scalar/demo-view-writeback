@@ -125,10 +125,16 @@ function lookupLabel(col, v) {
 
 function renderGrid() {
   const cols = DEF.columns.filter(c => c.visible || c.isKey);
-  const html = `<table class="grid"><tr>` +
-      cols.map(c => `<th>${c.viewColumn}${c.isKey ? " 🔑" : ""}${c.updatable
+  // plan-011: 集計 view など更新可能列が無い view は read-only(保存ボタンを出さない)
+  const readOnly = !DEF.columns.some(c => c.updatable);
+  const aggregate = DEF.columns.some(c => c.aggregate);
+  const note = aggregate
+      ? `<div style="padding:4px 0; color:#8e44ad;">集計 view(read-only)— 編集はできません。ベース変更後はリフレッシュで再計算されます。</div>`
+      : "";
+  const html = note + `<table class="grid"><tr>` +
+      cols.map(c => `<th>${c.viewColumn}${c.isKey ? " 🔑" : ""}${c.aggregate ? ` <small>(${c.aggregate})</small>` : ""}${c.updatable
           ? `<span class="badge ${c.via === "TX" ? "tx" : "re"}">${c.via}</span>` : ""}</th>`).join("") +
-      `<th></th></tr>` +
+      (readOnly ? "" : `<th></th>`) + `</tr>` +
       ROWS.map((row, ri) => `<tr>` + cols.map(c => {
         const v = row[c.viewColumn] ?? "";
         if (v === "UPDATE REQUESTED") {
@@ -148,7 +154,7 @@ function renderGrid() {
           return `<td class="${c.isKey ? "keycol" : ""}">${lookupLabel(c.viewColumn, v)}</td>`;
         }
         return `<td class="${c.isKey ? "keycol" : ""}">${v}</td>`;
-      }).join("") + `<td><button class="rowbtn" onclick="saveRow(${ri}, this)">保存</button></td></tr>`).join("") +
+      }).join("") + (readOnly ? "" : `<td><button class="rowbtn" onclick="saveRow(${ri}, this)">保存</button></td>`) + `</tr>`).join("") +
       `</table>`;
   document.getElementById("gridWrap").innerHTML = html;
 }

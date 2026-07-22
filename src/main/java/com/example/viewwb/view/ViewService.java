@@ -238,6 +238,9 @@ public class ViewService {
      * design-note-mv-maintenance.md 決定欄)。
      */
     private TableMetadata entityMetadata(ViewDefinition def) {
+        if (def.isAggregate()) {
+            return aggregateEntityMetadata(def);
+        }
         TableMetadata.Builder builder = TableMetadata.newBuilder();
         for (ColumnDef c : def.columns()) {
             if (!c.visible() && !c.isKey()) {
@@ -255,6 +258,25 @@ public class ViewService {
         return builder.build();
     }
 
+    /**
+     * plan-011: 集計 view(read-only)の実体テーブル定義。1 行 = 1 グループなので、
+     * ソース行 1:1 の {@code <alias>_pk} は使わず、内部 PK 列 {@code _group_pk}
+     * (GROUP BY 列値の連結キー)を単一パーティションキーにする。write-back しないため
+     * secondary index は張らない。
+     */
+    private TableMetadata aggregateEntityMetadata(ViewDefinition def) {
+        TableMetadata.Builder builder = TableMetadata.newBuilder();
+        for (ColumnDef c : def.columns()) {
+            if (!c.visible() && c.hasAggregate()) {
+                continue; // 非表示の集計列は実体化しない(GROUP BY 列は常に含める)
+            }
+            builder.addColumn(c.viewColumn(), dataType(c));
+        }
+        builder.addColumn(ViewDefinition.GROUP_PK, DataType.TEXT);
+        builder.addPartitionKey(ViewDefinition.GROUP_PK);
+        return builder.build();
+    }
+
     private DataType dataType(ColumnDef c) {
         try {
             return DataType.valueOf(c.kind().toUpperCase());
@@ -266,10 +288,14 @@ public class ViewService {
 
     /** spark-connect の取得結果を views.<view> に投入(クエリは呼び出し側で実行済み) */
     private int insertRows(ViewDefinition def, List<Map<String, Object>> sparkRows) {
+        boolean aggregate = def.isAggregate();
         Map<String, DataType> kinds = new LinkedHashMap<>();
         def.columns().stream()
-                .filter(c -> c.visible() || c.isKey())
+                .filter(c -> aggregate ? (c.visible() || !c.hasAggregate()) : (c.visible() || c.isKey()))
                 .forEach(c -> kinds.put(c.viewColumn(), dataType(c)));
+        List<String> groupCols = aggregate
+                ? def.groupColumns().stream().map(ColumnDef::viewColumn).toList()
+                : List.of();
 
         tx.run("materialize " + def.viewName(), t -> {
             for (Map<String, Object> sparkRow : sparkRows) {
@@ -278,11 +304,17 @@ public class ViewService {
                     values.put(e.getKey(),
                             ValueCodec.parse(e.getKey(), e.getValue(), sparkRow.get(e.getKey())));
                 }
-                // 内部連結キー <alias>_pk(実体 PK)。ソースキー列は TableRef.keyColumns 順で連結
-                for (ViewDefinition.TableRef table : def.tables()) {
-                    values.put(ViewDefinition.pkColumn(table.alias()), KeyConcat.encode(values,
-                            def.keyColumnsOf(table.alias()).stream()
-                                    .map(ColumnDef::viewColumn).toList()));
+                if (aggregate) {
+                    // 実体 PK = GROUP BY 列値の連結(総計 = GROUP BY なしは "*" 固定)
+                    values.put(ViewDefinition.GROUP_PK,
+                            groupCols.isEmpty() ? "*" : KeyConcat.encode(values, groupCols));
+                } else {
+                    // 内部連結キー <alias>_pk(実体 PK)。ソースキー列は TableRef.keyColumns 順で連結
+                    for (ViewDefinition.TableRef table : def.tables()) {
+                        values.put(ViewDefinition.pkColumn(table.alias()), KeyConcat.encode(values,
+                                def.keyColumnsOf(table.alias()).stream()
+                                        .map(ColumnDef::viewColumn).toList()));
+                    }
                 }
                 repo.insert(t, MetaSchema.NS_VIEWS, def.viewName(), values);
             }
@@ -299,7 +331,11 @@ public class ViewService {
                 .sorted(Comparator.comparingInt(ColumnDef::sortOrder))
                 .toList());
         if (sorts.isEmpty()) {
-            sorts.addAll(def.keyColumns());
+            // 既定ソート: 非集計はキー列、集計 view は GROUP BY 列
+            sorts.addAll(def.isAggregate() ? def.groupColumns() : def.keyColumns());
+        }
+        if (sorts.isEmpty()) {
+            return; // ソート対象なし(GROUP BY 無し総計など)。natural ordering は Map に効かないため回避
         }
         Comparator<Map<String, Object>> comparator = null;
         for (ColumnDef c : sorts) {

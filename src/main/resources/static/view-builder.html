@@ -222,14 +222,13 @@ canvas.addEventListener("drop", async ev => {
 async function addTable(ref, x, y, preset) {
   const catalogTable = findCatalogTable(ref);
   if (!catalogTable) return;
-  // キー情報の遅延取得(scalardb は getTableMetadata、それ以外は known=false)
+  // キー情報の遅延取得(scalardb は getTableMetadata、非 scalardb は接続情報から自動取得。
+  // どちらも取れなければ known=false でユーザー手動指定にフォールバック — plan-010)
   let pk = [], ck = [], keysKnown = false;
-  if (ref.scalardb) {
-    const res = await fetch(`/api/catalog/table-keys?namespace=${encodeURIComponent(ref.ns)}&table=${encodeURIComponent(ref.table)}`);
-    const body = await res.json();
-    if (body.success && body.data.known) {
-      pk = body.data.partitionKeys; ck = body.data.clusteringKeys; keysKnown = true;
-    }
+  const res = await fetch(`/api/catalog/table-keys?dataSource=${encodeURIComponent(ref.ds)}&namespace=${encodeURIComponent(ref.ns)}&table=${encodeURIComponent(ref.table)}`);
+  const body = await res.json();
+  if (body.success && body.data.known) {
+    pk = body.data.partitionKeys; ck = body.data.clusteringKeys; keysKnown = true;
   }
   if (!keysKnown && preset && preset.keyColumns.length > 0) {
     pk = [preset.keyColumns[0]]; ck = preset.keyColumns.slice(1); // 編集時: 保存済みキーを復元

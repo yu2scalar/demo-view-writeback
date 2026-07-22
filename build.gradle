@@ -29,6 +29,8 @@ dependencies {
 
 	// FC-1: Analytics カタログ DB 直読
 	implementation 'org.postgresql:postgresql:42.7.4'
+	// plan-010: 非 ScalarDB データソースの PK を information_schema から自動取得(MySQL 用ドライバ)
+	runtimeOnly 'com.mysql:mysql-connector-j:9.1.0'
 	// FC-2: spark-connect クライアント(サーバー Spark 3.5.6 / standalone に合わせる)
 	// log4j-slf4j2-impl は Spring Boot の log4j-to-slf4j と共存できないため除外(logback に一本化)
 	implementation('org.apache.spark:spark-connect-client-jvm_2.12:3.5.6') {

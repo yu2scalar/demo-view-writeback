@@ -47,6 +47,25 @@ public class CatalogService {
         return current;
     }
 
+    /**
+     * 指定 datasource をカタログから引く(接続情報 = provider_payload_json を保持する内部モデル)。
+     * tree() のパスワードマスクは通さない。plan-010 のキー自動解決で接続情報を使うため。
+     * 見つからなければ null。
+     */
+    public DataSourceInfo dataSource(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (CatalogInfo c : catalogs(false)) {
+            for (DataSourceInfo ds : c.dataSources()) {
+                if (ds.name().equals(name)) {
+                    return ds;
+                }
+            }
+        }
+        return null;
+    }
+
     /** 指定 datasource / namespace / table のカタログ定義を返す(無ければ 404) */
     public TableInfo table(String dataSource, String namespace, String table) {
         for (CatalogInfo c : catalogs(false)) {

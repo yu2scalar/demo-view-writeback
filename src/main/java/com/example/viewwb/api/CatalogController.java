@@ -1,9 +1,9 @@
 package com.example.viewwb.api;
 
 import com.example.viewwb.catalog.CatalogService;
-import com.example.viewwb.core.DynamicRepository;
+import com.example.viewwb.catalog.TableKeyService;
+import com.example.viewwb.catalog.TableKeyService.TableKeys;
 import com.example.viewwb.dto.ApiResponse;
-import com.scalar.db.api.TableMetadata;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -19,11 +19,11 @@ import java.util.Map;
 public class CatalogController {
 
     private final CatalogService catalogService;
-    private final DynamicRepository repo;
+    private final TableKeyService tableKeyService;
 
-    public CatalogController(CatalogService catalogService, DynamicRepository repo) {
+    public CatalogController(CatalogService catalogService, TableKeyService tableKeyService) {
         this.catalogService = catalogService;
-        this.repo = repo;
+        this.tableKeyService = tableKeyService;
     }
 
     @GetMapping
@@ -35,23 +35,19 @@ public class CatalogController {
 
     /**
      * キー情報の遅延取得(カタログにはキー情報が無いため)。
-     * scalardb テーブルは getTableMetadata で補完、それ以外は known=false を返し
-     * GUI 側でユーザーがキー列を指定する。
+     * scalardb テーブルは getTableMetadata で補完、非 scalardb テーブルは data_source の
+     * 接続情報から PK を自動取得する(plan-010)。いずれも取れなければ known=false を返し、
+     * GUI 側でユーザーがキー列を手動指定する。
      */
     @GetMapping("/table-keys")
     public ApiResponse<Map<String, Object>> tableKeys(
+            @RequestParam(required = false) String dataSource,
             @RequestParam String namespace, @RequestParam String table) {
+        TableKeys keys = tableKeyService.resolve(dataSource, namespace, table);
         Map<String, Object> result = new LinkedHashMap<>();
-        TableMetadata meta = repo.metadataOrNull(namespace, table);
-        if (meta == null) {
-            result.put("known", false);
-            result.put("partitionKeys", List.of());
-            result.put("clusteringKeys", List.of());
-        } else {
-            result.put("known", true);
-            result.put("partitionKeys", List.copyOf(meta.getPartitionKeyNames()));
-            result.put("clusteringKeys", List.copyOf(meta.getClusteringKeyNames()));
-        }
+        result.put("known", keys.known());
+        result.put("partitionKeys", keys.partitionKeys());
+        result.put("clusteringKeys", keys.clusteringKeys());
         return ApiResponse.success(result);
     }
 }

@@ -4,12 +4,14 @@
 #   kubectl create secret generic scalardb-credentials \
 #     --from-literal=SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_KEY="$CLUSTER_LICENSE_KEY" \
 #     --from-literal=SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_CHECK_CERT_PEM="$LICENSE_CHECK_CERT"
-# ホストからは indirect:192.168.49.2 + contact_port 30053(envoy NodePort)
+# ホストからは indirect:192.168.49.2 + contact_port 30053(envoy nodePort、温存)
+# plan-012: 外部 SQL クライアント用に LoadBalancer 化(minikube tunnel 常駐前提)。
+#           LAN の別マシンからはホストの socat(0.0.0.0:60053 → 192.168.49.2:30053)経由。
 envoy:
   enabled: true
   replicaCount: 1
   service:
-    type: NodePort
+    type: LoadBalancer
     ports:
       envoy:
         port: 60053
@@ -40,6 +42,7 @@ scalardbCluster:
     scalar.db.multi_storage.namespace_mapping=erp:postgres,payroll:postgres
     scalar.db.multi_storage.default_storage=mysql
     scalar.db.cross_partition_scan.enabled=true
+    scalar.db.sql.enabled=true
     scalar.db.cluster.auth.enabled=true
     scalar.db.cluster.node.licensing.license_key=${env:SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_KEY}
     scalar.db.cluster.node.licensing.license_check_cert_pem=${env:SCALAR_DB_CLUSTER_NODE_LICENSING_LICENSE_CHECK_CERT_PEM}

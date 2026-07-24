@@ -80,7 +80,7 @@ PGPASSWORD=scalaradmin psql -h "$MINIKUBE_IP" -p 30432 -U scalaradmin -d erpdb \
 unset PGPASSWORD
 
 # ---- 3. ScalarDB Cluster ----------------------------------------------------
-step "ScalarDB Cluster 3.18(envoy NodePort 30053)"
+step "ScalarDB Cluster 3.18(envoy LoadBalancer 60053 / nodePort 30053)"
 helm upgrade --install scalardb-cluster scalar-labs/scalardb-cluster \
   -f "$ENV_DIR/scalardb-cluster-custom-values.yaml"
 kubectl rollout status deployment/scalardb-cluster-node --timeout=300s

@@ -1,0 +1,74 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.5.16'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+
+	// FC-1: Analytics カタログ DB 直読
+	implementation 'org.postgresql:postgresql:42.7.4'
+	// plan-010: 非 ScalarDB データソースの PK を information_schema から自動取得(MySQL 用ドライバ)
+	runtimeOnly 'com.mysql:mysql-connector-j:9.1.0'
+	// FC-2: spark-connect クライアント(サーバー Spark 3.5.6 / standalone に合わせる)
+	// log4j-slf4j2-impl は Spring Boot の log4j-to-slf4j と共存できないため除外(logback に一本化)
+	implementation('org.apache.spark:spark-connect-client-jvm_2.12:3.5.6') {
+		exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j2-impl'
+	}
+	// plan-005 T0: ScalarDB Cluster 接続(.129 minikube。FC-3 まではライブラリモード直結だった)
+	implementation 'com.scalar-labs:scalardb-cluster-java-client-sdk:3.18.0'
+	// scalardb の commons-text が要求するが、依存解決で落ちるため明示指定
+	implementation 'org.apache.commons:commons-lang3:3.17.0'
+	// RE イベント body の組み立て(mavenLocal、前身デモと同じ)
+	implementation 'org.example:demo-scalar-re-sdk:0.12.0-SNAPSHOT'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+// spark-connect クライアントの Arrow が JDK17 のモジュール制限に掛かるため必須
+tasks.named('bootRun') {
+	jvmArgs '--add-opens=java.base/java.nio=ALL-UNNAMED'
+}
+
+// java -jar 直接起動でも同じ open が効くようマニフェストで宣言(JEP 261 の Add-Opens 属性)
+tasks.named('bootJar') {
+	manifest {
+		attributes 'Add-Opens': 'java.base/java.nio'
+	}
+}
+
+// フィージビリティチェックの実行タスク: ./gradlew fc1 / fc2 / fc3(fc4 は本実装の DynamicRepository に発展済み)
+['fc1': 'com.example.viewwb.fc.Fc1CatalogRead',
+ 'fc2': 'com.example.viewwb.fc.Fc2SparkConnect',
+ 'fc3': 'com.example.viewwb.fc.Fc3ScalarDbWriteback'].each { taskName, mainClazz ->
+	tasks.register(taskName, JavaExec) {
+		group = 'feasibility'
+		classpath = sourceSets.main.runtimeClasspath
+		mainClass = mainClazz
+		// spark-connect クライアントの Arrow が JDK17 のモジュール制限に掛かるため(本実装の起動オプションにも必要)
+		jvmArgs '--add-opens=java.base/java.nio=ALL-UNNAMED'
+	}
+}

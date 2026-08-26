@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>外部システムコンソール(模擬)</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; background: #f7f4ef;
+         margin: 0; min-height: 100vh; }
+  header { background: #6d4c2f; color: #fff; padding: 12px 24px; display: flex;
+           align-items: baseline; gap: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: #d9c9b8; font-size: 12px; }
+  header a { color: #f0e4d7; margin-left: auto; font-size: 12px; }
+  #wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+  .section { background: #fff; border: 1px solid #e0d8cc; border-radius: 8px;
+             padding: 18px 24px; margin-bottom: 20px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  select { padding: 5px 8px; font-size: 13px; }
+  label { font-size: 12px; color: #666; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid #ece5da; padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #faf6f0; color: #6d5c48; font-weight: 600; font-size: 12px; }
+  button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer;
+           font-size: 12px; color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .approve { background: #1e8449; }
+  .rejectb { background: #c0392b; }
+  .ghost { background: #8d7b66; }
+  .empty { color: #999; font-size: 13px; padding: 10px 4px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .b0 { background: #fdf0d5; color: #9a6b00; }
+  .b1 { background: #d9f2e3; color: #1e8449; }
+  .b2 { background: #fadbd8; color: #c0392b; }
+  .changes { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .changes .arrow { color: #999; }
+  #msg { font-size: 12px; margin: 10px 0 0; min-height: 1em; }
+  #msg.ok { color: #1e8449; }
+  #msg.ng { color: #c0392b; }
+</style>
+</head>
+<body>
+<header>
+  <h1>外部システムコンソール(模擬)</h1>
+  <span class="sub">RE で届いた変更リクエストの承認 — 許可 = 自システムの DB を更新して SUCCEEDED を返送 / 却下 = REJECTED を返送</span>
+  <a href="index.html">ホーム</a>
+</header>
+<div id="wrap">
+  <div class="section">
+    <div class="toolbar">
+      <label>Namespace(外部システム)</label>
+      <select id="ns" onchange="loadInbox()">
+        <option value="erp">erp(ERP: 受発注)</option>
+        <option value="payroll">payroll(給与システム)</option>
+      </select>
+      <label><input type="checkbox" id="showDone" onchange="render()"> 処理済みも表示</label>
+      <button class="ghost" onclick="loadInbox()">再読込</button>
+      <span id="meta" style="margin-left:auto; color:#888; font-size:12px;"></span>
+    </div>
+    <table>
+      <thead><tr><th style="width:130px">受信</th><th>依頼元 view</th><th>対象テーブル / キー</th>
+        <th>変更内容(現在値 → 依頼値)</th><th style="width:90px">状態</th><th style="width:150px">操作</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden>変更リクエストはありません。</div>
+    <div id="msg"></div>
+  </div>
+</div>
+<script>
+let ITEMS = [];
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  return res.json();
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmt(ts) { return ts ? new Date(Number(ts)).toLocaleString("ja-JP") : "-"; }
+
+function statusBadge(s) {
+  if (s === 1) return '<span class="badge b1">許可済み</span>';
+  if (s === 2) return '<span class="badge b2">却下済み</span>';
+  return '<span class="badge b0">未処理</span>';
+}
+
+function changesHtml(p) {
+  const req = p.requested_changes || {};
+  const before = p.before || {};
+  return Object.keys(req).map(col =>
+      `<div class="changes">${esc(col)}: ${esc(before[col] ?? "-")} <span class="arrow">→</span> <b>${esc(req[col])}</b></div>`).join("");
+}
+
+function render() {
+  const showDone = document.getElementById("showDone").checked;
+  const items = ITEMS.filter(it => showDone || !(it.status === 1 || it.status === 2));
+  const ns = document.getElementById("ns").value;
+  document.getElementById("rows").innerHTML = items.map(it => {
+    const p = it.payload || {};
+    const pending = !(it.status === 1 || it.status === 2);
+    return `<tr>
+      <td>${fmt(it.deliveredAt)}</td>
+      <td>${esc(p.source ?? "-")}</td>
+      <td>${esc(p.dest_table ?? "-")}<br><span class="changes">${esc(JSON.stringify(p.dest_key ?? {}))}</span></td>
+      <td>${changesHtml(p)}</td>
+      <td>${statusBadge(it.status)}</td>
+      <td>
+        <button class="approve" ${pending ? "" : "disabled"} onclick="act('${esc(it.eventId)}','approve', this)">許可</button>
+        <button class="rejectb" ${pending ? "" : "disabled"} onclick="act('${esc(it.eventId)}','reject', this)">却下</button>
+      </td></tr>`;
+  }).join("");
+  document.getElementById("empty").hidden = items.length > 0;
+  document.getElementById("meta").textContent =
+      `未処理 ${ITEMS.filter(it => !(it.status === 1 || it.status === 2)).length} / 全 ${ITEMS.length} 件`;
+}
+
+async function loadInbox() {
+  const ns = document.getElementById("ns").value;
+  const body = await api(`/api/external/${encodeURIComponent(ns)}/inbox`);
+  if (!body.success) { setMsg(false, body.message); return; }
+  ITEMS = body.data;
+  render();
+}
+
+async function act(eventId, action, btn) {
+  btn.disabled = true;
+  const ns = document.getElementById("ns").value;
+  const body = await api(`/api/external/${encodeURIComponent(ns)}/inbox/${encodeURIComponent(eventId)}/${action}`,
+      { method: "POST" });
+  if (!body.success) { setMsg(false, body.message); btn.disabled = false; return; }
+  setMsg(true, action === "approve"
+      ? `許可しました — 自システムの DB を更新し SUCCEEDED を返送(更新行: ${body.data.rawRowsUpdated})`
+      : "却下しました — REJECTED を返送");
+  await loadInbox();
+}
+
+function setMsg(ok, text) {
+  const el = document.getElementById("msg");
+  el.className = ok ? "ok" : "ng";
+  el.textContent = text;
+}
+
+loadInbox();
+setInterval(loadInbox, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# ScalarDB Analytics Server 3.18.0(chart 1.2.0)— .130 minikube 用
+# ライセンスは Secret `analytics-credentials` から env 注入:
+#   source config/set_license.sh
+#   kubectl create secret generic analytics-credentials \
+#     --from-literal=SCALAR_DB_ANALYTICS_SERVER_LICENSING_LICENSE_KEY="$ANALYTICS_LICENSE_KEY" \
+#     --from-literal=SCALAR_DB_ANALYTICS_SERVER_LICENSING_LICENSE_CHECK_CERT_PEM="$LICENSE_CHECK_CERT"
+# ホストからは 192.168.49.2:31051(catalog)/ :31052(metering)
+scalarDbAnalyticsServer:
+  secretName: analytics-credentials
+  properties: |
+    scalar.db.analytics.server.catalog.port=11051
+    scalar.db.analytics.server.metering.port=11052
+    scalar.db.analytics.server.db.contact_points=jdbc:postgresql://postgresql-scalardb-analytics.default.svc.cluster.local:5432/scalardb_analytics
+    scalar.db.analytics.server.db.username=scalaradmin
+    scalar.db.analytics.server.db.password=scalaradmin
+    scalar.db.analytics.server.metering.storage.provider=filesystem
+    scalar.db.analytics.server.metering.storage.container_name=metering
+    scalar.db.analytics.server.metering.storage.path=/tmp
+    scalar.db.analytics.server.licensing.license_key=${env:SCALAR_DB_ANALYTICS_SERVER_LICENSING_LICENSE_KEY}
+    scalar.db.analytics.server.licensing.license_check_cert_pem=${env:SCALAR_DB_ANALYTICS_SERVER_LICENSING_LICENSE_CHECK_CERT_PEM}
+  service:
+    type: NodePort
+    ports:
+      scalardb-analytics-server-catalog:
+        port: 11051
+        targetPort: 11051
+        protocol: TCP
+        nodePort: 31051
+      scalardb-analytics-server-metering:
+        port: 11052
+        targetPort: 11052
+        protocol: TCP
+        nodePort: 31052

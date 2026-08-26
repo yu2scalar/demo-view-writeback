@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>View Builder プロトタイプ (SSMS 風)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; font-size: 13px;
+         display: flex; flex-direction: column; height: 100vh; background: #f4f5f7; }
+  header { background: #2c3e50; color: #fff; padding: 6px 12px; display: flex; gap: 10px; align-items: center; }
+  header input { padding: 4px 8px; border: none; border-radius: 3px; width: 220px; }
+  header button { padding: 5px 12px; border: none; border-radius: 3px; cursor: pointer; background: #3498db; color: #fff; }
+  header button:hover { background: #2980b9; }
+  #main { display: flex; flex: 1; min-height: 0; }
+  /* 左: カタログツリー */
+  #tree { width: 240px; background: #fff; border-right: 1px solid #ddd; overflow: auto; padding: 8px; }
+  #tree h3 { margin: 4px 0; font-size: 12px; color: #666; }
+  .tree-ds { margin: 6px 0 2px; font-weight: 600; }
+  .badge { font-size: 10px; border-radius: 3px; padding: 1px 5px; color: #fff; margin-left: 4px; }
+  .badge.tx { background: #27ae60; } .badge.re { background: #e67e22; }
+  .tree-ns { margin-left: 10px; color: #555; }
+  .tree-table { margin-left: 22px; padding: 2px 6px; cursor: grab; border-radius: 3px; }
+  .tree-table:hover { background: #eaf2fb; }
+  /* 中央: キャンバス + 下部ペイン */
+  #center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #canvas { flex: 1; position: relative; overflow: auto; background:
+    linear-gradient(90deg, #f0f1f3 1px, transparent 1px), linear-gradient(#f0f1f3 1px, transparent 1px);
+    background-size: 20px 20px; }
+  #canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #canvas svg path.wire { pointer-events: stroke; cursor: pointer; }
+  #canvas svg path.wire:hover { stroke-width: 4; }
+  .col-row .handle.connected { background: #2980b9; }
+  #joinPopup { position: absolute; z-index: 50; background: #fff; border: 1px solid #999;
+    border-radius: 5px; box-shadow: 0 3px 10px rgba(0,0,0,.25); padding: 8px; display: none; }
+  #joinPopup .title { font-family: Consolas, monospace; font-size: 12px; margin-bottom: 6px; }
+  #joinPopup button { border: none; background: #e74c3c; color: #fff; border-radius: 3px;
+    cursor: pointer; padding: 3px 10px; margin-left: 8px; }
+  .table-card { position: absolute; width: 210px; background: #fff; border: 1px solid #b8c4ce;
+    border-radius: 5px; box-shadow: 0 2px 6px rgba(0,0,0,.12); user-select: none; }
+  .table-card .head { background: #34495e; color: #fff; padding: 4px 8px; border-radius: 5px 5px 0 0;
+    cursor: move; display: flex; justify-content: space-between; align-items: center; }
+  .table-card .head .close { cursor: pointer; padding: 0 4px; }
+  .col-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-top: 1px solid #f0f0f0; }
+  .col-row:hover { background: #f5faff; }
+  .col-row .kind { color: #999; font-size: 11px; margin-left: auto; }
+  .col-row .handle { width: 10px; height: 10px; border-radius: 50%; background: #b8c4ce; cursor: crosshair; flex: none; }
+  .col-row .handle:hover, .col-row .handle.active { background: #e74c3c; }
+  .keyicon { font-size: 11px; }
+  /* 下部: タブペイン */
+  #bottom { height: 270px; background: #fff; border-top: 2px solid #ccd; display: flex; flex-direction: column; }
+  #tabs { display: flex; background: #ecf0f1; }
+  #tabs div { padding: 6px 16px; cursor: pointer; border-right: 1px solid #ddd; }
+  #tabs div.active { background: #fff; font-weight: 600; }
+  .pane { flex: 1; overflow: auto; padding: 8px; display: none; }
+  .pane.active { display: block; }
+  table.grid { border-collapse: collapse; width: 100%; }
+  table.grid th, table.grid td { border: 1px solid #ddd; padding: 3px 8px; text-align: left; }
+  table.grid th { background: #f7f8fa; }
+  table.grid input[type=text] { width: 130px; border: 1px solid #ccc; padding: 2px 4px; }
+  pre#sql { margin: 0; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+  select { border: 1px solid #ccc; padding: 2px; }
+  .join-row { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .join-row button { border: none; background: #e74c3c; color: #fff; border-radius: 3px; cursor: pointer; padding: 2px 8px; }
+  dialog { border: 1px solid #999; border-radius: 6px; width: 640px; max-height: 80vh; }
+  dialog pre { overflow: auto; max-height: 60vh; background: #f7f8fa; padding: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>View Builder</strong>
+  <input id="viewName" placeholder="View 名 (例: item_overview)" value="item_overview">
+  <button onclick="showPreview()">プレビュー実行</button>
+  <button onclick="saveDefinition()">保存 (JSON)</button>
+  <span style="margin-left:auto;font-size:11px;opacity:.8">テーブルを左からドラッグ / カラムの●同士をドラッグで JOIN</span>
+</header>
+<div id="main">
+  <div id="tree"><h3>Analytics カタログ</h3></div>
+  <div id="center">
+    <div id="canvas"><svg id="wires"></svg>
+      <div id="joinPopup">
+        <div class="title"></div>
+        <select id="joinPopupType" onchange="popupChangeType(this.value)"></select>
+        <button onclick="popupDeleteJoin()">削除</button>
+      </div>
+    </div>
+    <div id="bottom">
+      <div id="tabs">
+        <div class="active" data-pane="pane-cols" onclick="selectTab(this)">列マッピング</div>
+        <div data-pane="pane-joins" onclick="selectTab(this)">JOIN</div>
+        <div data-pane="pane-sql" onclick="selectTab(this)">SQL</div>
+        <div data-pane="pane-preview" onclick="selectTab(this)">プレビュー</div>
+      </div>
+      <div id="pane-cols" class="pane active"></div>
+      <div id="pane-joins" class="pane"></div>
+      <div id="pane-sql" class="pane"><pre id="sql"></pre></div>
+      <div id="pane-preview" class="pane"></div>
+    </div>
+  </div>
+</div>
+<dialog id="jsonDialog">
+  <h3>view_definition JSON</h3>
+  <pre id="jsonOut"></pre>
+  <button onclick="document.getElementById('jsonDialog').close()">閉じる</button>
+</dialog>
+
+<script>
+// ---- モックカタログ(FC-1 の実データ構造を踏襲。pk/ck は getTableMetadata 相当) ----
+const CATALOG = {
+  catalog: "scalardb_catalog",
+  dataSources: [
+    { name: "ds_scalardb", providerType: "scalardb", namespaces: [
+      { name: "ns_mysql", tables: [
+        { name: "item_stock", pk: ["id"], ck: ["item_group_id"], columns: [
+          { name: "id", kind: "INT" }, { name: "item_group_id", kind: "INT" }, { name: "item_stock_qty", kind: "INT" } ] },
+        { name: "item_master", pk: ["id"], ck: [], columns: [
+          { name: "id", kind: "INT" }, { name: "item_name", kind: "TEXT" }, { name: "unit_price", kind: "INT" } ] },
+      ]},
+      { name: "ns_postgres", tables: [
+        { name: "item_stock", pk: ["id"], ck: ["item_group_id"], columns: [
+          { name: "id", kind: "INT" }, { name: "item_group_id", kind: "INT" }, { name: "item_stock_qty", kind: "INT" } ] },
+        { name: "warehouse", pk: ["warehouse_id"], ck: [], columns: [
+          { name: "warehouse_id", kind: "INT" }, { name: "warehouse_name", kind: "TEXT" }, { name: "location", kind: "TEXT" } ] },
+      ]},
+    ]},
+    { name: "ds_mysql", providerType: "mysql", namespaces: [
+      { name: "erp", tables: [
+        { name: "orders", pk: ["order_id"], ck: [], columns: [
+          { name: "order_id", kind: "INT" }, { name: "item_id", kind: "INT" },
+          { name: "order_qty", kind: "INT" }, { name: "order_status", kind: "TEXT" } ] },
+      ]},
+    ]},
+  ],
+};
+
+// ---- 状態 ----
+const placed = [];   // {alias, ds, providerType, ns, table(def), x, y, el, selected:Set(col)}
+const joins = [];    // {fromAlias, fromCol, toAlias, toCol, type}
+const colOptions = {}; // "alias.col" -> {viewName, visible, updatable}
+let aliasSeq = 0;
+
+// ---- カタログツリー描画 ----
+const tree = document.getElementById("tree");
+CATALOG.dataSources.forEach(ds => {
+  const dsDiv = document.createElement("div");
+  dsDiv.className = "tree-ds";
+  dsDiv.innerHTML = `${ds.name}<span class="badge ${ds.providerType === "scalardb" ? "tx" : "re"}">${ds.providerType === "scalardb" ? "TX" : "RE"}</span>`;
+  tree.appendChild(dsDiv);
+  ds.namespaces.forEach(ns => {
+    const nsDiv = document.createElement("div");
+    nsDiv.className = "tree-ns";
+    nsDiv.textContent = ns.name;
+    tree.appendChild(nsDiv);
+    ns.tables.forEach(t => {
+      const tDiv = document.createElement("div");
+      tDiv.className = "tree-table";
+      tDiv.textContent = "▦ " + t.name;
+      tDiv.draggable = true;
+      tDiv.addEventListener("dragstart", ev =>
+        ev.dataTransfer.setData("text/plain", JSON.stringify({ ds: ds.name, ns: ns.name, table: t.name })));
+      tree.appendChild(tDiv);
+    });
+  });
+});
+
+// ---- キャンバスへのドロップ ----
+const canvas = document.getElementById("canvas");
+canvas.addEventListener("dragover", ev => ev.preventDefault());
+canvas.addEventListener("drop", ev => {
+  ev.preventDefault();
+  const ref = JSON.parse(ev.dataTransfer.getData("text/plain"));
+  const rect = canvas.getBoundingClientRect();
+  addTable(ref, ev.clientX - rect.left + canvas.scrollLeft, ev.clientY - rect.top + canvas.scrollTop);
+});
+
+function findDef(ref) {
+  const ds = CATALOG.dataSources.find(d => d.name === ref.ds);
+  const ns = ds.namespaces.find(n => n.name === ref.ns);
+  return { ds, ns, table: ns.tables.find(t => t.name === ref.table) };
+}
+
+function addTable(ref, x, y) {
+  const { ds, ns, table } = findDef(ref);
+  const alias = "t" + (++aliasSeq);
+  const entry = { alias, ds: ds.name, providerType: ds.providerType, ns: ns.name, table, x, y,
+                  selected: new Set([...table.pk, ...table.ck]) };
+  const card = document.createElement("div");
+  card.className = "table-card";
+  card.style.left = x + "px";
+  card.style.top = y + "px";
+  const via = ds.providerType === "scalardb" ? "tx" : "re";
+  card.innerHTML = `<div class="head"><span>${alias}: ${ns.name}.${table.name}
+      <span class="badge ${via}">${via.toUpperCase()}</span></span><span class="close">✕</span></div>`;
+  table.columns.forEach(col => {
+    const isKey = table.pk.includes(col.name) || table.ck.includes(col.name);
+    const row = document.createElement("div");
+    row.className = "col-row";
+    row.innerHTML = `<input type="checkbox" ${isKey ? "checked disabled" : ""}>
+      <span class="keyicon">${table.pk.includes(col.name) ? "🔑" : table.ck.includes(col.name) ? "🗝" : ""}</span>
+      <span>${col.name}</span><span class="kind">${col.kind}</span><span class="handle" title="ドラッグで JOIN"></span>`;
+    const cb = row.querySelector("input");
+    cb.addEventListener("change", () => {
+      cb.checked ? entry.selected.add(col.name) : entry.selected.delete(col.name);
+      refresh();
+    });
+    row.querySelector(".handle").dataset.ref = alias + "." + col.name;
+    card.appendChild(row);
+  });
+  card.querySelector(".close").addEventListener("click", () => removeTable(entry, card));
+  enableDragMove(card, entry);
+  canvas.appendChild(card);
+  entry.el = card;
+  placed.push(entry);
+  refresh();
+}
+
+function removeTable(entry, card) {
+  card.remove();
+  placed.splice(placed.indexOf(entry), 1);
+  for (let i = joins.length - 1; i >= 0; i--) {
+    if (joins[i].fromAlias === entry.alias || joins[i].toAlias === entry.alias) joins.splice(i, 1);
+  }
+  refresh();
+}
+
+function enableDragMove(card, entry) {
+  const head = card.querySelector(".head");
+  head.addEventListener("mousedown", ev => {
+    if (ev.target.classList.contains("close")) return;
+    const startX = ev.clientX, startY = ev.clientY, origX = entry.x, origY = entry.y;
+    function move(e) {
+      entry.x = origX + e.clientX - startX;
+      entry.y = origY + e.clientY - startY;
+      card.style.left = entry.x + "px";
+      card.style.top = entry.y + "px";
+      drawWires();
+    }
+    function up() { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// ---- JOIN 結線(ハンドル間ドラッグ) ----
+let dragFrom = null;
+canvas.addEventListener("mousedown", ev => {
+  if (!ev.target.classList.contains("handle")) return;
+  dragFrom = ev.target;
+  dragFrom.classList.add("active");
+  ev.preventDefault();
+});
+document.addEventListener("mouseup", ev => {
+  if (!dragFrom) return;
+  const target = document.elementFromPoint(ev.clientX, ev.clientY);
+  if (target && target.classList.contains("handle") && target !== dragFrom) {
+    const [fa, fc] = dragFrom.dataset.ref.split(".");
+    const [ta, tc] = target.dataset.ref.split(".");
+    if (fa !== ta) {
+      joins.push({ fromAlias: fa, fromCol: fc, toAlias: ta, toCol: tc, type: "INNER" });
+    }
+  }
+  dragFrom.classList.remove("active");
+  dragFrom = null;
+  refresh();
+});
+
+// ---- SVG 結線描画 ----
+const JOIN_TYPES = ["INNER", "LEFT", "RIGHT", "FULL"];
+const JOIN_SQL = { INNER: "INNER JOIN", LEFT: "LEFT OUTER JOIN", RIGHT: "RIGHT OUTER JOIN", FULL: "FULL OUTER JOIN" };
+const JOIN_COLOR = { INNER: "#2980b9", LEFT: "#8e44ad", RIGHT: "#16a085", FULL: "#e67e22" };
+
+function handlePos(ref) {
+  const h = [...document.querySelectorAll(".handle")].find(x => x.dataset.ref === ref);
+  if (!h) return null;
+  const hr = h.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+  return { x: hr.left + hr.width / 2 - cr.left + canvas.scrollLeft, y: hr.top + hr.height / 2 - cr.top + canvas.scrollTop };
+}
+function drawWires() {
+  const svg = document.getElementById("wires");
+  svg.innerHTML = "";
+  document.querySelectorAll(".handle.connected").forEach(h => h.classList.remove("connected"));
+  const labelStack = {};  // 同一ハンドル起点のラベル重なり回避
+  joins.forEach((j, idx) => {
+    const fromRef = j.fromAlias + "." + j.fromCol, toRef = j.toAlias + "." + j.toCol;
+    const p1 = handlePos(fromRef), p2 = handlePos(toRef);
+    if (!p1 || !p2) return;
+    // 接続済みハンドルを色付け
+    [fromRef, toRef].forEach(ref => {
+      const h = [...document.querySelectorAll(".handle")].find(x => x.dataset.ref === ref);
+      if (h) h.classList.add("connected");
+    });
+    // エルボー(直角)コネクタ。縦線がカードに重なる場合は右側へ迂回
+    let mid = (p1.x + p2.x) / 2;
+    const yLo = Math.min(p1.y, p2.y), yHi = Math.max(p1.y, p2.y);
+    const blocked = placed.some(p => {
+      const w = p.el.offsetWidth, h = p.el.offsetHeight;
+      return mid >= p.x - 4 && mid <= p.x + w + 4 && yHi >= p.y && yLo <= p.y + h;
+    });
+    if (blocked) mid = Math.max(p1.x, p2.x) + 25;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${p1.x} ${p1.y} L ${mid} ${p1.y} L ${mid} ${p2.y} L ${p2.x} ${p2.y}`);
+    path.setAttribute("stroke", JOIN_COLOR[j.type]);
+    path.setAttribute("stroke-width", "2.5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("class", "wire");
+    path.addEventListener("click", ev => openJoinPopup(idx, ev));
+    svg.appendChild(path);
+    // ラベルは左側ハンドルの近く(カードに隠れないように)。同一起点は段積み
+    const left = p1.x <= p2.x ? p1 : p2;
+    const stackKey = Math.round(left.x) + ":" + Math.round(left.y);
+    const stack = labelStack[stackKey] = (labelStack[stackKey] ?? -1) + 1;
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", left.x + 16); label.setAttribute("y", left.y - 7 - stack * 13);
+    label.setAttribute("fill", "#444"); label.setAttribute("font-size", "10");
+    label.setAttribute("paint-order", "stroke");
+    label.setAttribute("stroke", "#ffffff"); label.setAttribute("stroke-width", "3");
+    label.textContent = `${j.type}: ${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+    svg.appendChild(label);
+  });
+}
+
+// ---- JOIN 線クリックで編集ポップアップ ----
+let popupJoinIndex = -1;
+function openJoinPopup(idx, ev) {
+  popupJoinIndex = idx;
+  const j = joins[idx];
+  const popup = document.getElementById("joinPopup");
+  popup.querySelector(".title").textContent = `${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+  const sel = document.getElementById("joinPopupType");
+  sel.innerHTML = JOIN_TYPES.map(t => `<option ${j.type === t ? "selected" : ""}>${t}</option>`).join("");
+  const rect = canvas.getBoundingClientRect();
+  popup.style.left = (ev.clientX - rect.left + canvas.scrollLeft + 8) + "px";
+  popup.style.top = (ev.clientY - rect.top + canvas.scrollTop + 8) + "px";
+  popup.style.display = "block";
+  ev.stopPropagation();
+}
+function popupChangeType(type) {
+  if (popupJoinIndex >= 0) { joins[popupJoinIndex].type = type; refresh(); }
+}
+function popupDeleteJoin() {
+  if (popupJoinIndex >= 0) { joins.splice(popupJoinIndex, 1); closeJoinPopup(); refresh(); }
+}
+function closeJoinPopup() {
+  document.getElementById("joinPopup").style.display = "none";
+  popupJoinIndex = -1;
+}
+canvas.addEventListener("mousedown", ev => {
+  if (!ev.target.closest("#joinPopup") && !ev.target.classList.contains("wire")) closeJoinPopup();
+});
+
+// ---- 列マッピング / JOIN 一覧 / SQL の再描画 ----
+function selectedColumns() {
+  const cols = [];
+  placed.forEach(p => p.table.columns.forEach(c => {
+    if (!p.selected.has(c.name)) return;
+    const key = p.alias + "." + c.name;
+    const isKey = p.table.pk.includes(c.name) || p.table.ck.includes(c.name);
+    if (!colOptions[key]) {
+      colOptions[key] = { viewName: placed.length > 1 ? p.alias + "_" + c.name : c.name,
+                          visible: true, updatable: false, sortOrder: 0, sortDir: "ASC" };
+    }
+    cols.push({ key, alias: p.alias, col: c.name, kind: c.kind, isKey, providerType: p.providerType, opt: colOptions[key] });
+  }));
+  return cols;
+}
+
+function refresh() {
+  drawWires();
+  // 列マッピング
+  const cols = selectedColumns();
+  const pane = document.getElementById("pane-cols");
+  const usedSortNums = cols.map(c => c.opt.sortOrder).filter(n => n > 0);
+  pane.innerHTML = `<table class="grid"><tr><th>View 列名</th><th>ソース</th><th>型</th><th>キー</th>
+    <th>表示</th><th>更新可</th><th>ソート順</th><th>昇降</th><th>経路</th></tr>` +
+    cols.map(c => `<tr>
+      <td><input type="text" value="${c.opt.viewName}" onchange="colOptions['${c.key}'].viewName=this.value; renderSql()"></td>
+      <td>${c.key}</td><td>${c.kind}</td>
+      <td>${c.isKey ? "🔑 (除外不可)" : ""}</td>
+      <td><input type="checkbox" ${c.opt.visible ? "checked" : ""} onchange="colOptions['${c.key}'].visible=this.checked"></td>
+      <td><input type="checkbox" ${c.opt.updatable ? "checked" : ""} ${c.isKey ? "disabled" : ""}
+          onchange="colOptions['${c.key}'].updatable=this.checked"></td>
+      <td><select onchange="colOptions['${c.key}'].sortOrder=+this.value; refresh()">
+        <option value="0">—</option>
+        ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${c.opt.sortOrder === n ? "selected" : ""}
+          ${usedSortNums.includes(n) && c.opt.sortOrder !== n ? "disabled" : ""}>${n}</option>`).join("")}
+      </select></td>
+      <td><select ${c.opt.sortOrder === 0 ? "disabled" : ""} onchange="colOptions['${c.key}'].sortDir=this.value; renderSql()">
+        <option value="ASC" ${c.opt.sortDir === "ASC" ? "selected" : ""}>昇順</option>
+        <option value="DESC" ${c.opt.sortDir === "DESC" ? "selected" : ""}>降順</option>
+      </select></td>
+      <td><span class="badge ${c.providerType === "scalardb" ? "tx" : "re"}">${c.providerType === "scalardb" ? "TX" : "RE"}</span></td>
+    </tr>`).join("") + "</table>";
+  // JOIN 一覧
+  const jp = document.getElementById("pane-joins");
+  jp.innerHTML = joins.length === 0 ? "<i>JOIN なし(カラムの●同士をドラッグして作成)</i>" :
+    joins.map((j, i) => `<div class="join-row">
+      <select onchange="joins[${i}].type=this.value; refresh()">
+        ${JOIN_TYPES.map(t => `<option ${j.type === t ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <span>${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}</span>
+      <button onclick="joins.splice(${i},1); refresh()">削除</button></div>`).join("");
+  renderSql();
+}
+
+function fqn(p) { return `${CATALOG.catalog}.${p.ds}.${p.ns}.${p.table.name}`; }
+
+function renderSql() {
+  const cols = selectedColumns().filter(c => c.opt.visible || c.isKey);
+  let sql = "";
+  if (placed.length > 0) {
+    sql = "SELECT\n" + cols.map(c => `  ${c.key} AS ${c.opt.viewName}`).join(",\n") +
+      `\nFROM ${fqn(placed[0])} ${placed[0].alias}`;
+    const joined = new Set([placed[0].alias]);
+    joins.forEach(j => {
+      const next = joined.has(j.fromAlias) ? j.toAlias : j.fromAlias;
+      const p = placed.find(x => x.alias === next);
+      if (!p || joined.has(next)) return;
+      joined.add(next);
+      sql += `\n${JOIN_SQL[j.type]} ${fqn(p)} ${p.alias} ON ${j.fromAlias}.${j.fromCol} = ${j.toAlias}.${j.toCol}`;
+    });
+    placed.filter(p => !joined.has(p.alias)).forEach(p => {
+      sql += `\nCROSS JOIN ${fqn(p)} ${p.alias} -- ⚠ JOIN 条件未定義`;
+    });
+    // ソートキー(番号順)から ORDER BY を生成
+    const sorts = selectedColumns().filter(c => c.opt.sortOrder > 0)
+        .sort((a, b) => a.opt.sortOrder - b.opt.sortOrder);
+    if (sorts.length > 0) {
+      sql += "\nORDER BY " + sorts.map(c => `${c.opt.viewName} ${c.opt.sortDir}`).join(", ");
+    }
+  }
+  document.getElementById("sql").textContent = sql;
+}
+
+// ---- プレビュー(モック行生成) ----
+function showPreview() {
+  selectTab(document.querySelector('[data-pane="pane-preview"]'));
+  const cols = selectedColumns().filter(c => c.opt.visible || c.isKey);
+  const mock = { INT: i => (i + 1) * 100, BIGINT: i => (i + 1) * 1000, TEXT: i => "sample_" + (i + 1),
+                 BOOLEAN: () => "true", DOUBLE: i => (i + 1) * 1.5 };
+  const rows = [0, 1, 2].map(i => cols.map(c => (mock[c.kind] || (() => "-"))(i)));
+  document.getElementById("pane-preview").innerHTML =
+    `<table class="grid"><tr>${cols.map(c => `<th>${c.opt.viewName}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr>${r.map(v => `<td>${v}</td>`).join("")}</tr>`).join("") +
+    `</table><p style="color:#888">※ モックデータ(本実装では spark-connect の実行結果)</p>`;
+}
+
+// ---- 保存(view_definition JSON) ----
+function saveDefinition() {
+  const cols = selectedColumns();
+  const def = {
+    viewName: document.getElementById("viewName").value,
+    catalog: CATALOG.catalog,
+    tables: placed.map(p => ({ alias: p.alias, dataSource: p.ds, providerType: p.providerType,
+      namespace: p.ns, table: p.table.name, keyColumns: [...p.table.pk, ...p.table.ck] })),
+    joins: joins.map(j => ({ type: j.type, left: j.fromAlias + "." + j.fromCol, right: j.toAlias + "." + j.toCol })),
+    columns: cols.map(c => ({ viewColumn: c.opt.viewName, source: c.key, kind: c.kind, isKey: c.isKey,
+      visible: c.opt.visible, updatable: c.opt.updatable,
+      sortOrder: c.opt.sortOrder || null, sortDir: c.opt.sortOrder > 0 ? c.opt.sortDir : null,
+      via: c.providerType === "scalardb" ? "TX" : "RE" })),
+    sql: document.getElementById("sql").textContent,
+  };
+  document.getElementById("jsonOut").textContent = JSON.stringify(def, null, 2);
+  document.getElementById("jsonDialog").showModal();
+  console.log("view_definition", def);
+}
+
+function selectTab(el) {
+  document.querySelectorAll("#tabs div").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById(el.dataset.pane).classList.add("active");
+}
+
+// ---- ?demo で組み立て済みの状態を再現(動作確認・デモ用) ----
+if (new URLSearchParams(location.search).has("demo")) {
+  addTable({ ds: "ds_scalardb", ns: "ns_mysql", table: "item_stock" }, 60, 40);
+  addTable({ ds: "ds_scalardb", ns: "ns_mysql", table: "item_master" }, 400, 90);
+  addTable({ ds: "ds_mysql", ns: "erp", table: "orders" }, 740, 40);
+  joins.push({ fromAlias: "t1", fromCol: "id", toAlias: "t2", toCol: "id", type: "INNER" });
+  joins.push({ fromAlias: "t1", fromCol: "id", toAlias: "t3", toCol: "item_id", type: "LEFT" });
+  placed[0].selected.add("item_stock_qty");
+  placed[1].selected.add("item_name");
+  placed[2].selected.add("order_qty");
+  placed[2].selected.add("order_status");
+  refresh();
+  colOptions["t1.item_stock_qty"].updatable = true;
+  colOptions["t3.order_status"].updatable = true;
+  colOptions["t1.id"].sortOrder = 1;
+  colOptions["t2.item_name"].sortOrder = 2;
+  colOptions["t2.item_name"].sortDir = "DESC";
+  refresh();
+}
+</script>
+</body>
+</html>

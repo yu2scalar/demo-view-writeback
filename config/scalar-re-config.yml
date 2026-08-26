@@ -1,0 +1,147 @@
+# ScalarRE configuration for demo-view-writeback v2 (Analytics カタログ環境).
+#
+# Topology (2026-07-19 更新, .130 ローカル minikube 環境。手順: docs/local-env-setup.md):
+#   - App は ScalarDB Cluster(indirect:192.168.49.2:30053)経由で書き込む。
+#   - RE core は Cluster のバックエンド MySQL(minikube NodePort 192.168.49.2:30306)に
+#     DIRECT JDBC で接続し、coordinator namespace を共有する(consensus-commit の相互運用)。
+#   - .129 向けの旧デフォルト: host=192.168.214.129 port=3306 user/pass=scalaradmin。
+#     env(SCALAR_RE_DB_HOST 等)で切替可能。
+#   - viewmgr namespace: view_def / update_module / re_outbox(transactional outbox)
+#   - 宛先(plan-006 で変更): ERP = PostgreSQL(erpdb、カタログ PG に相乗り)。
+#     erp namespace の re_inbox へ一方向配送(delivery-type: atomic、ack 不要)。
+#     Cluster 側も multi-storage(erp:postgres)で同じ配置を見る。
+schema-version: "1.0"
+
+global:
+  re-tables:
+    re_node_heartbeat: { namespace: scalarre }
+    re_completed:      { namespace: scalarre }
+    re_queue:          { namespace: scalarre }
+    re_subscription:   { namespace: scalarre }
+  auth:
+    api-key: ${SCALAR_RE_API_KEY:demo-api-key-change-me}
+  retry:
+    max-attempts: 3
+    initial-delay-ms: 100
+    max-delay-ms: 5000
+    multiplier: 2
+  internal-queue:
+    worker-threads: 10
+    queue-capacity: 10000
+  cluster:
+    cluster-id: default
+    heartbeat-interval-ms: 30000
+    heartbeat-expiry-ms: 60000
+    cleanup-retention-ms: 86400000
+  license:
+    max-nodes: 3
+    expires-at: 2027-12-31
+  server:
+    tomcat-max-threads: 200
+
+scalardb:
+  transaction-manager: consensus-commit
+  isolation-level: READ_COMMITTED
+  default-storage: viewmgr
+
+# viewmgr = Cluster バックエンドの MySQL / dest = ERP の PostgreSQL(erpdb)。
+# coordinator は default-storage(viewmgr = MySQL)側で Cluster と共有する。
+storages:
+  viewmgr:
+    type: jdbc
+    driver: mysql
+    host: ${SCALAR_RE_DB_HOST:192.168.49.2}
+    port: ${SCALAR_RE_DB_PORT:30306}
+    database: ${SCALAR_RE_DB_DATABASE:viewmgr}
+    username: ${SCALAR_RE_DB_USERNAME:root}
+    password: ${SCALAR_RE_DB_PASSWORD:mysql}
+    options:
+      connection-pool-max-total: 10
+      metadata-cache-expiration-secs: 60
+  dest:
+    type: jdbc
+    driver: postgresql
+    host: ${SCALAR_RE_DEST_HOST:192.168.49.2}
+    port: ${SCALAR_RE_DEST_PORT:30432}
+    database: ${SCALAR_RE_DEST_DATABASE:erpdb}
+    username: ${SCALAR_RE_DEST_USERNAME:scalaradmin}
+    password: ${SCALAR_RE_DEST_PASSWORD:scalaradmin}
+    options:
+      connection-pool-max-total: 10
+      metadata-cache-expiration-secs: 60
+
+namespaces:
+  scalarre:
+    storage: viewmgr
+    destination:
+      worker-threads: 10
+      queue-capacity: 10000
+      throughput-tps: 500
+  viewmgr:
+    storage: viewmgr
+    destination:
+      worker-threads: 10
+      queue-capacity: 10000
+      throughput-tps: 500
+    polling:
+      outbox-poll-interval-ms: 1000
+      outbox-poll-delay-ms: 500
+      outbox-batch-size: 100
+    completed-enabled: true
+    hmac:
+      key: ${SCALAR_RE_HMAC_KEY_VIEWMGR:demo-hmac-key-viewmgr-change-me}
+      key-previous: ${SCALAR_RE_HMAC_KEY_VIEWMGR_PREV:}
+      key-previous-expires-at: 0
+    event-types:
+      ViewWritebackChangeRequested:
+        delivery-type: atomic
+        enabled: true
+        partition-count: 2
+  # 宛先: 非 ScalarDB テーブルが属する namespace ごとに定義する。
+  # plan-006: ERP の raw PG テーブル(ds_postgres 経由で View に参加)の erp を宛先にする。
+  erp:
+    storage: dest
+    destination:
+      worker-threads: 10
+      queue-capacity: 10000
+      throughput-tps: 500
+    # plan-009 復路: 外部システム(模擬)が返す承認結果を viewmgr へ配送する
+    polling:
+      outbox-poll-interval-ms: 1000
+      outbox-poll-delay-ms: 500
+      outbox-batch-size: 100
+    completed-enabled: true
+    hmac:
+      key: ${SCALAR_RE_HMAC_KEY_DEST:demo-hmac-key-dest-change-me}
+      key-previous: ${SCALAR_RE_HMAC_KEY_DEST_PREV:}
+      key-previous-expires-at: 0
+    # event-type 名は namespace ごとに一意にする(同名だと RE 0.9.1 のライフサイクル
+    # 管理が名前キーで衝突し 2 つ目以降が paused のまま — 2026-07-20 実測)
+    event-types:
+      ViewWritebackResolved_erp:
+        delivery-type: atomic
+        enabled: true
+        partition-count: 2
+  # plan-007: 2 つ目の宛先 = 給与システム(payroll.emp_payroll、同じ erpdb の別スキーマ)。
+  # vw_employee_overview の payroll_status 編集が payroll.re_inbox へ配送される。
+  payroll:
+    storage: dest
+    destination:
+      worker-threads: 10
+      queue-capacity: 10000
+      throughput-tps: 500
+    # plan-009 復路: 外部システム(模擬)が返す承認結果を viewmgr へ配送する
+    polling:
+      outbox-poll-interval-ms: 1000
+      outbox-poll-delay-ms: 500
+      outbox-batch-size: 100
+    completed-enabled: true
+    hmac:
+      key: ${SCALAR_RE_HMAC_KEY_DEST:demo-hmac-key-dest-change-me}
+      key-previous: ${SCALAR_RE_HMAC_KEY_DEST_PREV:}
+      key-previous-expires-at: 0
+    event-types:
+      ViewWritebackResolved_payroll:
+        delivery-type: atomic
+        enabled: true
+        partition-count: 2

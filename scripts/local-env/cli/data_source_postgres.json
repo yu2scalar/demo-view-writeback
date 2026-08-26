@@ -1,0 +1,8 @@
+{
+  "type": "postgresql",
+  "host": "192.168.49.2",
+  "port": 30432,
+  "username": "scalaradmin",
+  "password": "scalaradmin",
+  "database": "erpdb"
+}

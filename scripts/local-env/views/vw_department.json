@@ -1,0 +1,14 @@
+{
+  "viewName": "vw_department",
+  "catalog": "scalardb_catalog",
+  "tables": [
+    {"alias": "d", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "hr", "table": "department", "keyColumns": ["dept_id"], "scalarDb": true}
+  ],
+  "joins": [],
+  "columns": [
+    {"viewColumn": "dept_id", "source": "d.dept_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": 1, "sortDir": "ASC", "via": "TX"},
+    {"viewColumn": "dept_name", "source": "d.dept_name", "kind": "TEXT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "capacity", "source": "d.capacity", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "headcount", "source": "d.headcount", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"}
+  ]
+}

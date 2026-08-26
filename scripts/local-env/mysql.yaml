@@ -1,0 +1,51 @@
+# Cluster バックエンド DB(MySQL 8)。bitnami/mysql は 2025 のカタログ変更で
+# イメージ取得不可 + 9系のため、公式 mysql:8.0 の素の manifest を使う。
+# 永続化なし(デモ用途。minikube delete / pod 再作成でデータ消失)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-scalardb
+spec:
+  serviceName: mysql-scalardb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-scalardb
+  template:
+    metadata:
+      labels:
+        app: mysql-scalardb
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: mysql
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+          readinessProbe:
+            exec:
+              # socket パスがイメージ既定と異なるため TCP で ping
+              command: ["mysqladmin", "ping", "-h127.0.0.1", "-uroot", "-pmysql"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-scalardb
+spec:
+  type: NodePort
+  selector:
+    app: mysql-scalardb
+  ports:
+    - port: 3306
+      targetPort: 3306
+      nodePort: 30306

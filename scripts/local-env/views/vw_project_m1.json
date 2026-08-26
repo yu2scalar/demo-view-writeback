@@ -1,0 +1,16 @@
+{
+  "viewName": "vw_project_m1",
+  "catalog": "scalardb_catalog",
+  "tables": [
+    {"alias": "p", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "project", "table": "project", "keyColumns": ["project_id"], "scalarDb": true}
+  ],
+  "joins": [],
+  "columns": [
+    {"viewColumn": "project_id", "source": "p.project_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": 1, "sortDir": "ASC", "via": "TX", "aggregate": null},
+    {"viewColumn": "project_name", "source": "p.project_name", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX", "aggregate": null},
+    {"viewColumn": "material_id", "source": "p.material_id", "kind": "INT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX", "aggregate": null}
+  ],
+  "filters": [
+    {"source": "p.material_id", "operator": "=", "value": "1", "kind": "INT"}
+  ]
+}

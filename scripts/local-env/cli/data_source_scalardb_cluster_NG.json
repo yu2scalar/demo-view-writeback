@@ -1,0 +1,11 @@
+{
+  "type": "scalardb",
+  "configs": {
+    "scalar.db.transaction_manager": "cluster",
+    "scalar.db.contact_points": "indirect:192.168.49.2",
+    "scalar.db.contact_port": "30053",
+    "scalar.db.cluster.auth.enabled": "true",
+    "scalar.db.username": "admin",
+    "scalar.db.password": "admin"
+  }
+}

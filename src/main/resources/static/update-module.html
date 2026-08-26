@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>更新モジュールエディタ — demo-view-writeback</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/drawflow.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Noto Sans CJK JP", sans-serif; font-size: 13px;
+         display: flex; flex-direction: column; height: 100vh; }
+  header { background: #2c3e50; color: #fff; padding: 6px 12px; display: flex; gap: 10px; align-items: center; }
+  header a { color: #9fc3e8; text-decoration: none; }
+  header button { padding: 5px 12px; border: none; border-radius: 3px; cursor: pointer; background: #3498db; color: #fff; }
+  #main { display: flex; flex: 1; min-height: 0; }
+  #side { width: 250px; background: #f7f8fa; border-right: 1px solid #ddd; padding: 10px; overflow: auto; }
+  #side h3 { font-size: 12px; color: #666; margin: 8px 0 4px; }
+  .palette-item { background: #fff; border: 1px solid #b8c4ce; border-radius: 4px; padding: 6px 10px;
+    margin: 4px 0; cursor: grab; }
+  .palette-item:hover { background: #eaf2fb; }
+  .var-item { font-family: Consolas, monospace; font-size: 11px; padding: 1px 4px; color: #2c3e50; white-space: nowrap; }
+  #drawflow { flex: 1; position: relative; background:
+    linear-gradient(90deg, #f0f1f3 1px, transparent 1px), linear-gradient(#f0f1f3 1px, transparent 1px);
+    background-size: 20px 20px; }
+  #canvasCtl { position: absolute; top: 10px; right: 10px; z-index: 20; display: flex; gap: 4px;
+    align-items: center; background: rgba(255,255,255,.92); border: 1px solid #ccd;
+    border-radius: 5px; padding: 4px 8px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  #canvasCtl button { width: 28px; height: 24px; border: 1px solid #b8c4ce; background: #fff;
+    border-radius: 3px; cursor: pointer; font-weight: 700; }
+  #canvasCtl button:hover { background: #eaf2fb; }
+  #canvasCtl .hint { font-size: 10px; color: #777; margin-left: 6px; }
+  .drawflow .drawflow-node { background: #fff; border: 1px solid #b8c4ce; border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12); padding: 0; width: 200px; font-size: 12px; }
+  .drawflow .drawflow-node.selected { border-color: #3498db; }
+  .node-head { color: #fff; padding: 4px 8px; border-radius: 5px 5px 0 0; font-weight: 600; }
+  .node-body { padding: 6px 8px; }
+  .node-body input, .node-body select { width: 100%; margin: 2px 0; border: 1px solid #ccc; padding: 2px 4px; font-size: 11px; }
+  .n-start .node-head { background: #16a085; }
+  .n-read .node-head { background: #2980b9; }
+  .n-var .node-head { background: #7f8c8d; }
+  .n-compare .node-head { background: #f39c12; }
+  .n-branch .node-head { background: #8e44ad; }
+  .n-update .node-head { background: #27ae60; }
+  .n-abort .node-head { background: #c0392b; }
+  .n-commit .node-head { background: #2c3e50; }
+  .outlabel { font-size: 10px; color: #888; text-align: center; padding: 0 6px 4px; }
+  #drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs {
+    position: absolute; left: 0; width: 100%; display: flex; justify-content: center; gap: 60px; }
+  #drawflow .drawflow-node .inputs { top: -9px; }
+  #drawflow .drawflow-node .outputs { bottom: -9px; }
+  #drawflow .drawflow-node .input, #drawflow .drawflow-node .output {
+    position: static; margin: 0; width: 15px; height: 15px; border: 2px solid #7f8c8d; background: #fff; }
+  #drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: #f1c40f; }
+  dialog { border: 1px solid #999; border-radius: 6px; width: 640px; max-height: 85vh; }
+  dialog pre { overflow: auto; max-height: 65vh; background: #f7f8fa; padding: 8px; font-size: 11px; }
+  #status { color: #f1c40f; font-size: 12px; }
+  #status.ng { color: #ff8f7a; font-weight: 600; }
+  header button:disabled { background: #6b7a89; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <strong>更新モジュールエディタ</strong>
+  <span id="target">読込中…</span>
+  <button id="saveBtn" onclick="saveModule()">保存</button>
+  <button id="jsonBtn" onclick="showJson()">JSON 確認</button>
+  <span id="status"></span>
+  <span style="margin-left:auto"></span>
+  <a id="editLink" href="data-edit.html">データ編集</a>
+  <a href="index.html">ホーム</a>
+</header>
+<div id="main">
+  <div id="side">
+    <h3>コントロール</h3>
+    <div class="palette-item" draggable="true" data-node="read">📥 レコード読込</div>
+    <div class="palette-item" draggable="true" data-node="var">🔤 変数</div>
+    <div class="palette-item" draggable="true" data-node="compare">⚖ 比較 (INT)</div>
+    <div class="palette-item" draggable="true" data-node="branch">🔀 分岐</div>
+    <div class="palette-item" draggable="true" data-node="update">✏ 更新</div>
+    <div class="palette-item" draggable="true" data-node="abort">⛔ 中断 (abort)</div>
+    <div class="palette-item" draggable="true" data-node="commit">✅ 完了 (commit)</div>
+    <h3>Model 変数 (自動生成)</h3>
+    <div id="vars">…</div>
+    <h3 style="margin-top:14px">線・ノードの操作</h3>
+    <div style="font-size:11px;color:#888">
+      接続: ノード下の●(出力)から次ノード上の●(入力)へドラッグ。<br>
+      削除: 線やノードをクリックで選択 → <b>Delete キー</b>
+      (または右クリック → 赤い×)。<br>
+      繋ぎ替え: 古い線を削除してから新しい線をドラッグ。
+    </div>
+    <h3 style="margin-top:14px">メモ</h3>
+    <div style="font-size:11px;color:#888">
+      変更のあったテーブルの After モデルだけがトランザクションに参加します。
+      changed.* で変更有無の分岐が書けます。読込は ScalarDB 配下の任意テーブルを指定可能です。
+    </div>
+  </div>
+  <div id="drawflow">
+    <div id="canvasCtl">
+      <button onclick="editor.zoom_out()" title="縮小">−</button>
+      <button onclick="editor.zoom_reset()" title="100%">1:1</button>
+      <button onclick="editor.zoom_in()" title="拡大">＋</button>
+      <span class="hint">背景ドラッグで移動 / Ctrl+ホイールでズーム</span>
+    </div>
+  </div>
+</div>
+<dialog id="jsonDialog">
+  <h3>更新モジュール定義 JSON</h3>
+  <pre id="jsonOut"></pre>
+  <button onclick="document.getElementById('jsonDialog').close()">閉じる</button>
+</dialog>
+
+<script src="vendor/drawflow.min.js"></script>
+<script>
+const viewName = new URLSearchParams(location.search).get("view");
+let DEF = null;
+
+const container = document.getElementById("drawflow");
+const editor = new Drawflow(container);
+editor.start();
+editor.createCurvature = function (sx, sy, ex, ey) {
+  const my = ey > sy ? (sy + ey) / 2 : sy + 30;
+  return `M ${sx} ${sy} L ${sx} ${my} L ${ex} ${my} L ${ex} ${ey}`;
+};
+
+// Drawflow の Delete キー処理はキャンバスにフォーカスがある時しか効かない
+// (線クリック → Delete が無反応になる)ため、document レベルで補完する
+document.addEventListener("keydown", e => {
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  const t = e.target;
+  if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+  if (container.contains(t)) return; // フォーカスがキャンバス内なら Drawflow 側に任せる
+  if (editor.connection_selected != null) {
+    editor.removeConnection();
+    e.preventDefault();
+  } else if (editor.node_selected != null) {
+    editor.removeNodeId(editor.node_selected.id);
+    e.preventDefault();
+  }
+});
+
+const NODE_DEFS = {
+  start:   { title: "開始 (Begin)", inputs: 0, outputs: 1, cls: "n-start", data: {},
+             body: `<div class="node-body">Tx 開始 + 受信: view 行 + 更新値</div>` },
+  read:    { title: "レコード読込", inputs: 1, outputs: 1, cls: "n-read",
+             data: { table: "", key: "", into: "rec" },
+             body: `<div class="node-body">
+                      <input df-table placeholder="ns.table または alias" title="対象テーブル">
+                      <input df-key placeholder="col=$input.x, ..." title="キー条件">
+                      <input df-into placeholder="格納変数" title="格納変数">
+                    </div>` },
+  var:     { title: "変数", inputs: 1, outputs: 1, cls: "n-var",
+             data: { name: "v1", expr: "" },
+             body: `<div class="node-body"><input df-name title="変数名"><input df-expr placeholder="式 (a - b)" title="式"></div>` },
+  compare: { title: "比較 (INT)", inputs: 1, outputs: 1, cls: "n-compare",
+             data: { left: "", op: ">=", right: "" },
+             body: `<div class="node-body">
+                      <input df-left placeholder="左辺" title="左辺">
+                      <select df-op><option>==</option><option>!=</option><option>&gt;=</option>
+                        <option>&gt;</option><option>&lt;=</option><option>&lt;</option></select>
+                      <input df-right placeholder="右辺" title="右辺">
+                    </div>` },
+  branch:  { title: "分岐", inputs: 1, outputs: 2, cls: "n-branch", data: {},
+             body: `<div class="node-body">条件: 直前の比較結果</div><div class="outlabel">左: true / 右: false</div>` },
+  update:  { title: "更新", inputs: 1, outputs: 1, cls: "n-update",
+             data: { table: "", key: "", set: "" },
+             body: `<div class="node-body"><input df-table placeholder="alias または ns.table" title="対象テーブル">
+                    <input df-key placeholder="key条件 (省略可): col=式, ..." title="キー条件。省略時は編集中の行。指定すると同一テーブルの別の行や View 非参加テーブルも更新できる(View への伝播なし)">
+                    <input df-set placeholder="col = 式, ..." title="SET 式"></div>` },
+  abort:   { title: "中断 (abort)", inputs: 1, outputs: 0, cls: "n-abort",
+             data: { reason: "検証NG" },
+             body: `<div class="node-body"><input df-reason title="理由"></div>` },
+  commit:  { title: "完了 (commit)", inputs: 1, outputs: 0, cls: "n-commit", data: {},
+             body: `<div class="node-body">トランザクション確定</div>` },
+};
+
+function addNode(type, x, y, data) {
+  const def = NODE_DEFS[type];
+  const html = `<div><div class="node-head">${def.title}</div>${def.body}</div>`;
+  const nodeData = Object.assign(JSON.parse(JSON.stringify(def.data)), data || {});
+  return editor.addNode(type, def.inputs, def.outputs, x, y, def.cls, nodeData, html);
+}
+
+document.querySelectorAll(".palette-item").forEach(item => {
+  item.addEventListener("dragstart", ev => ev.dataTransfer.setData("node", item.dataset.node));
+});
+container.addEventListener("dragover", ev => ev.preventDefault());
+container.addEventListener("drop", ev => {
+  ev.preventDefault();
+  const type = ev.dataTransfer.getData("node");
+  if (!type) return;
+  const rect = container.getBoundingClientRect();
+  addNode(type, ev.clientX - rect.left, ev.clientY - rect.top);
+});
+
+// ---- View 定義の読込 → Model 変数 + デフォルトフロー ----
+function disableEditing(message) {
+  document.getElementById("target").textContent = message;
+  document.getElementById("saveBtn").disabled = true;
+  document.getElementById("jsonBtn").disabled = true;
+  setError("ホームの View 一覧の「更新モジュール」ボタンから開いてください");
+}
+
+async function init() {
+  if (!viewName) { disableEditing("View が指定されていません"); return; }
+  document.getElementById("editLink").href = "data-edit.html?view=" + encodeURIComponent(viewName);
+  const res = await fetch("/api/views/" + encodeURIComponent(viewName));
+  const body = await res.json();
+  if (!body.success) { disableEditing(body.message); return; }
+  DEF = body.data.definition;
+  const updatables = DEF.columns.filter(c => c.updatable);
+  document.getElementById("target").textContent =
+      `対象: ${viewName} (更新可: ${updatables.map(c => c.viewColumn).join(", ") || "なし"})`;
+  renderVars(updatables);
+
+  const moduleRes = await fetch(`/api/views/${viewName}/module`);
+  const moduleBody = await moduleRes.json();
+  const flowJson = moduleBody.success ? moduleBody.data.flowJson : null;
+  if (flowJson) {
+    const flow = JSON.parse(flowJson);
+    if (flow.drawflow) { editor.import(flow.drawflow); return; }
+  }
+  buildDefaultFlow(updatables);
+}
+
+function renderVars(updatables) {
+  const container = document.getElementById("vars");
+  const lines = [];
+  lines.push(`<div class="var-item">$input.* / before.* … view 行</div>`);
+  DEF.columns.filter(c => c.visible || c.isKey).forEach(c =>
+      lines.push(`<div class="var-item">$input.${c.viewColumn} : ${c.kind}</div>`));
+  // フローは参加テーブルの非キー列すべてに書き込める(更新可 = GUI 直接編集の可否)
+  DEF.tables.forEach(t => {
+    const a = t.alias;
+    const writables = DEF.columns.filter(c => !c.isKey && c.source.startsWith(a + "."));
+    if (writables.length === 0) return;
+    lines.push(`<div class="var-item" style="margin-top:4px">after.${a} … ${t.namespace}.${t.table} (${t.providerType === "scalardb" ? "TX" : "RE"})</div>`);
+    writables.forEach(c =>
+        lines.push(`<div class="var-item">after.${a}.${c.source.split(".")[1]} : ${c.kind}${c.updatable ? " (更新可)" : ""}</div>`));
+    lines.push(`<div class="var-item">changed.${a} : BOOLEAN</div>`);
+  });
+  container.innerHTML = lines.join("");
+}
+
+/** デフォルト: 開始→読込(対象テーブル現在値)→比較→分岐→更新/中断→完了 */
+function buildDefaultFlow(updatables) {
+  const nStart = addNode("start", 380, 20);
+  if (updatables.length === 0) {
+    const nCommit = addNode("commit", 380, 160);
+    editor.addConnection(nStart, nCommit, "output_1", "input_1");
+    return;
+  }
+  const first = updatables[0];
+  const alias = first.source.split(".")[0];
+  const srcCol = first.source.split(".")[1];
+  const table = DEF.tables.find(t => t.alias === alias);
+  const keyExpr = DEF.columns.filter(c => c.isKey && c.source.startsWith(alias + "."))
+      .map(c => `${c.source.split(".")[1]}=$input.${c.viewColumn}`).join(", ");
+  const nRead = addNode("read", 380, 130,
+      { table: table.namespace + "." + table.table, key: keyExpr, into: "rec" });
+  const nCompare = addNode("compare", 380, 300,
+      { left: "$input." + first.viewColumn, op: ">=", right: "0" });
+  const nBranch = addNode("branch", 380, 470);
+  const nUpdate = addNode("update", 200, 600,
+      { table: alias, set: `${srcCol} = $input.${first.viewColumn}` });
+  const nAbort = addNode("abort", 620, 600, { reason: "検証NG" });
+  const nCommit = addNode("commit", 200, 750);
+  editor.addConnection(nStart, nRead, "output_1", "input_1");
+  editor.addConnection(nRead, nCompare, "output_1", "input_1");
+  editor.addConnection(nCompare, nBranch, "output_1", "input_1");
+  editor.addConnection(nBranch, nUpdate, "output_1", "input_1");
+  editor.addConnection(nBranch, nAbort, "output_2", "input_1");
+  editor.addConnection(nUpdate, nCommit, "output_1", "input_1");
+}
+
+// ---- 保存(engine 向け nodes + 再編集用 drawflow の両方を保存) ----
+function buildFlowJson() {
+  const raw = editor.export().drawflow.Home.data;
+  const nodes = Object.values(raw).map(n => ({
+    id: Number(n.id),
+    type: n.name,
+    params: n.data,
+    next: Object.fromEntries(Object.entries(n.outputs).map(([port, o]) =>
+      [n.name === "branch" ? (port === "output_1" ? "true" : "false") : "next",
+       o.connections.map(c => Number(c.node))])),
+  }));
+  return { moduleName: viewName + "_module", viewName, nodes, drawflow: editor.export() };
+}
+
+async function saveModule() {
+  const flow = buildFlowJson();
+  setStatus("保存中…");
+  const res = await fetch(`/api/views/${viewName}/module`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(flow),
+  });
+  const body = await res.json();
+  setStatus(body.success ? "保存しました" : "エラー: " + body.message);
+  if (body.success) setTimeout(() => setStatus(""), 3000);
+}
+
+function showJson() {
+  document.getElementById("jsonOut").textContent = JSON.stringify(buildFlowJson(), null, 2);
+  document.getElementById("jsonDialog").showModal();
+}
+
+function setStatus(text) {
+  const el = document.getElementById("status");
+  el.className = "";
+  el.textContent = text;
+}
+
+function setError(text) {
+  const el = document.getElementById("status");
+  el.className = "ng";
+  el.textContent = text;
+}
+
+init();
+</script>
+</body>
+</html>

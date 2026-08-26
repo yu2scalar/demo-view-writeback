@@ -1,0 +1,22 @@
+{
+  "viewName": "vw_employee_overview",
+  "catalog": "scalardb_catalog",
+  "tables": [
+    {"alias": "e", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "hr", "table": "employee", "keyColumns": ["emp_id"], "scalarDb": true},
+    {"alias": "pay", "dataSource": "ds_postgres", "providerType": "postgresql", "namespace": "payroll", "table": "emp_payroll", "keyColumns": ["emp_id"], "scalarDb": false}
+  ],
+  "joins": [
+    {"type": "INNER", "left": "e.emp_id", "right": "pay.emp_id"}
+  ],
+  "columns": [
+    {"viewColumn": "emp_id", "source": "e.emp_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": 1, "sortDir": "ASC", "via": "TX"},
+    {"viewColumn": "emp_name", "source": "e.emp_name", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "dept_id", "source": "e.dept_id", "kind": "INT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX",
+     "lookup": {"namespace": "hr", "table": "department", "keyColumn": "dept_id", "labelColumn": "dept_name"}},
+    {"viewColumn": "overtime_hours", "source": "e.overtime_hours", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "alert_level", "source": "e.alert_level", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX"},
+    {"viewColumn": "pay_emp_id", "source": "pay.emp_id", "kind": "INT", "isKey": true, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "RE"},
+    {"viewColumn": "payroll_no", "source": "pay.payroll_no", "kind": "TEXT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "RE"},
+    {"viewColumn": "payroll_status", "source": "pay.payroll_status", "kind": "TEXT", "isKey": false, "visible": true, "updatable": true, "sortOrder": null, "sortDir": null, "via": "RE"}
+  ]
+}

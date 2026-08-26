@@ -1,0 +1,14 @@
+{
+  "viewName": "vw_material_summary",
+  "catalog": "scalardb_catalog",
+  "tables": [
+    {"alias": "p", "dataSource": "ds_scalardb", "providerType": "scalardb", "namespace": "project", "table": "project", "keyColumns": ["project_id"], "scalarDb": true}
+  ],
+  "joins": [],
+  "columns": [
+    {"viewColumn": "material_id", "source": "p.material_id", "kind": "INT", "isKey": false, "visible": true, "updatable": false, "sortOrder": 1, "sortDir": "ASC", "via": "TX", "aggregate": null},
+    {"viewColumn": "total_volume", "source": "p.material_volume", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX", "aggregate": "SUM"},
+    {"viewColumn": "project_count", "source": "p.project_id", "kind": "BIGINT", "isKey": false, "visible": true, "updatable": false, "sortOrder": null, "sortDir": null, "via": "TX", "aggregate": "COUNT"}
+  ],
+  "filters": []
+}
